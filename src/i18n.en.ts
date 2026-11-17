@@ -16,6 +16,8 @@ export const EN: Record<string, string> = {
   '공유받은 여행을 담았습니다': 'Shared trip added',
   '링크가 잘렸거나 손상되었습니다. 보낸 사람에게 다시 받아 주세요': 'This link is cut off or damaged. Ask the sender for it again',
 
+  '개인정보처리방침': 'Privacy Policy',
+
   // ── 새 여행 ──
   '새 여행': 'New trip', '어디로 떠나나요': 'Where are you going?',
   '아래 도시는 동선까지 이은 일정 초안을 바로 받을 수 있습니다.': 'These cities come with a ready-made draft itinerary.',

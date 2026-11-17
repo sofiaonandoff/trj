@@ -165,6 +165,9 @@ button { cursor: pointer; border: 0; background: none; padding: 0; }
 }
 .fab:active { transform: translateX(-50%) scale(0.97); }
 
+.foot-link { display: block; text-align: center; margin-top: 36px; font-size: 13px; color: var(--mute); text-decoration: none; }
+.foot-link:hover { text-decoration: underline; }
+
 /* ── 새 여행 ──────────────────────────── */
 .topbar { display: flex; align-items: center; gap: 4px; height: 56px; padding: 0 8px; padding-top: env(safe-area-inset-top); box-sizing: content-box; }
 .topbar h1 { font-size: 17px; font-weight: 650; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

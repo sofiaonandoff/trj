@@ -25,7 +25,15 @@ npm run build    # dist/ 에 배포용 파일 생성
 npm run preview  # 빌드 결과 확인
 ```
 
-Cloudflare Pages에 올릴 때: 빌드 명령 `npm run build`, 출력 폴더 `dist`.
+## 배포 (Cloudflare Pages)
+
+GitHub `sofiaonandoff/TRJ`의 `main`에 push하면 Cloudflare Pages가 자동으로 빌드·배포한다.
+
+- 빌드 명령 `npm run build`, 출력 폴더 `dist`, Node 버전은 `.node-version`(22)
+- 공개용 Google 값(클라이언트 ID, Picker API 키)은 `.env.production`에 있다. 브라우저로 내려가는 값이라 비밀이 아니다.
+- 비밀 값 `GEMINI_API_KEY`는 Pages 설정 → 변수 및 비밀에 **암호화(Secret)** 로만 넣는다.
+- `functions/api/plan.ts`는 Pages Functions로 자동 배포된다.
+- 개인정보처리방침: `/privacy.html` (Google 로그인 화면 게시에 필요)
 
 ## 기능
 
@@ -80,7 +88,7 @@ VITE_GOOGLE_API_KEY=...
 
 1. OAuth 클라이언트의 JavaScript 원본과 API 키의 웹사이트 제한에 배포 주소를 추가한다.
 2. 동행 누구나 로그인하게 하려면 로그인 화면을 프로덕션으로 게시한다. 게시 전에 브랜딩에 홈페이지·개인정보처리방침 주소가 있어야 한다. 그 전까지는 '대상 → 테스트 사용자'에 동행 계정을 추가한다(최대 100명).
-3. Cloudflare Pages 환경 변수에 위 두 값을 넣는다.
+3. 공개용 두 값은 `.env.production`에 들어 있으므로 Cloudflare에 따로 넣지 않아도 된다.
 
 ## AI 일정 추천 (Gemini)
 

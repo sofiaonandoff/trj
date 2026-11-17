@@ -59,7 +59,7 @@ export default defineConfig(({ mode }) => {
         workbox: {
           globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
           maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
-          navigateFallbackDenylist: [/^\/api\//],
+          navigateFallbackDenylist: [/^\/api\//, /^\/privacy/],
           runtimeCaching: [
             {
               urlPattern: ({ url }) => url.hostname === 'tiles.openfreemap.org',

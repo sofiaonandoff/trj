@@ -69,6 +69,7 @@ export default function Home() {
         {rest.map((t) => <Row key={t.id} t={t} />)}
         {past.length > 0 && <h2 className="sec-title">{tr('지난 여행')}</h2>}
         {past.map((t) => <Row key={t.id} t={t} />)}
+        <a className="foot-link" href="/privacy.html">{tr('개인정보처리방침')}</a>
       </main>
 
       <button className="btn btn-primary fab" onClick={() => go('/new')}><Plus size={20} />{tr('새 여행 만들기')}</button>
