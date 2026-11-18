@@ -559,3 +559,6 @@ button { cursor: pointer; border: 0; background: none; padding: 0; }
 .rate-row .input { flex: 1; min-width: 0; height: 42px; }
 .rate-to { flex: none; font-weight: 600; font-size: 14px; color: var(--mute); }
 .rate-tag { flex: none; font-size: 11.5px; color: var(--mute); padding: 3px 8px; border-radius: 999px; box-shadow: inset 0 0 0 1px var(--line); }
+.tx-busy { margin-left: 8px; font-size: 11.5px; opacity: .75; padding: 2px 8px; border-radius: 999px; background: rgba(255,255,255,.12); animation: tx-pulse 1.4s ease-in-out infinite; }
+@keyframes tx-pulse { 50% { opacity: .4 } }
+@media (prefers-reduced-motion: reduce) { .tx-busy { animation: none } }

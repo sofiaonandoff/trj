@@ -1,6 +1,7 @@
 import { tr } from './i18n'
 import ViewPage from './components/ViewPage'
 import { initViewSync } from './lib/viewLink'
+import { initTripTranslations } from './lib/translate'
 import { useEffect } from 'react'
 import { JoinPage } from './components/DriveUI'
 import Home from './components/Home'
@@ -15,7 +16,7 @@ export default function App() {
   const route = useRoute()
   const add = useStore((s) => s.add)
 
-  useEffect(() => { initDrive(); initViewSync() }, [])
+  useEffect(() => { initDrive(); initViewSync(); initTripTranslations() }, [])
 
   // 복사본 링크(#/import/…)로 들어오면 여행을 이 기기에 담고 바로 연다
   useEffect(() => {

@@ -23,6 +23,7 @@ const C = { bg: new Color('#1C2C29'), ink: new Color('#F8F6F1'), mute: new Color
 const pad = (n) => String(n).padStart(2, '0')
 const ymd = (d) => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())
 const days = (a, b) => Math.round((Date.parse(b + 'T00:00:00') - Date.parse(a + 'T00:00:00')) / 86400000)
+const L = (t, s) => (s && t.tx && t.tx[s] && t.tx[s][LANG]) || s
 const md = (s) => Number(s.slice(5, 7)) + '.' + Number(s.slice(8, 10))
 
 async function load() {
@@ -39,15 +40,15 @@ async function load() {
 /** 그 날의 일정: 숙소 체크아웃·장소·항공편·체크인을 시각 순서로 */
 function agenda(t, date) {
   const out = []
-  for (const s of t.stays || []) if (s.checkOut === date) out.push({ time: s.outTime || '11:00', icon: '🛏', name: T.out + ' · ' + s.name })
+  for (const s of t.stays || []) if (s.checkOut === date) out.push({ time: s.outTime || '11:00', icon: '🛏', name: T.out + ' · ' + L(t, s.name) })
   let eff = '00:00'
   const day = (t.days || []).find((d) => d.date === date)
-  for (const p of day ? day.items : []) { eff = p.time || eff; out.push({ time: p.time, sort: eff, icon: '•', name: p.name }) }
+  for (const p of day ? day.items : []) { eff = p.time || eff; out.push({ time: p.time, sort: eff, icon: '•', name: L(t, p.name) }) }
   for (const f of t.flights || []) {
     if (f.depDate === date) out.push({ time: f.depTime, icon: '✈', name: f.flightNo + ' ' + f.from + '→' + f.to })
     else if (f.arrDate === date) out.push({ time: f.arrTime, icon: '✈', name: T.arr + ' ' + f.to + ' (' + f.flightNo + ')' })
   }
-  for (const s of t.stays || []) if (s.checkIn === date) out.push({ time: s.inTime || '15:00', icon: '🛏', name: T.in + ' · ' + s.name })
+  for (const s of t.stays || []) if (s.checkIn === date) out.push({ time: s.inTime || '15:00', icon: '🛏', name: T.in + ' · ' + L(t, s.name) })
   return out.map((e, i) => ({ ...e, i })).sort((a, b) => (a.sort || a.time || '99').localeCompare(b.sort || b.time || '99') || a.i - b.i)
 }
 
@@ -84,7 +85,7 @@ async function build() {
   // 머리: 여행 이름 + D-day/몇일차
   const head = w.addStack()
   head.centerAlignContent()
-  const ttl = head.addText(t.title)
+  const ttl = head.addText(L(t, t.title))
   ttl.font = Font.boldSystemFont(fam === 'small' ? 13 : 15)
   ttl.textColor = C.ink
   ttl.lineLimit = 1

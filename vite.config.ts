@@ -7,6 +7,7 @@ import { execSync } from 'node:child_process'
 const version = (process.env.CF_PAGES_COMMIT_SHA ?? (() => { try { return execSync('git rev-parse HEAD').toString() } catch { return 'dev' } })()).trim().slice(0, 7)
 import { handlePlan, type PlanEnv } from './server/plan'
 import { handleView, memoryStore } from './server/view'
+import { handleTranslate } from './server/translate'
 
 /**
  * 로컬(npm run dev / preview)에서도 /api/plan이 동작하게 한다.
@@ -45,10 +46,27 @@ function localApi(env: PlanEnv): Plugin {
       res.end(JSON.stringify(r.json))
     })
   }
+  // 번역: 로컬에는 Workers AI가 없으므로 Gemini로
+  const translateHandler = (req: Req, res: Res, next: () => void) => {
+    if (req.method !== 'POST') return next()
+    let raw = ''
+    req.on('data', (chunk) => { raw += String(chunk) })
+    req.on('end', async () => {
+      let body: unknown = null
+      try { body = JSON.parse(raw) } catch { /* 400 */ }
+      const r = body ? await handleTranslate(body, env) : { status: 400, json: { error: 'bad_request' } }
+      res.statusCode = r.status
+      res.setHeader('Content-Type', 'application/json')
+      res.end(JSON.stringify(r.json))
+    })
+  }
+  const use = (server: { middlewares: { use: (p: string, h: never) => void } }) => {
+    server.middlewares.use('/api/plan', handler as never); server.middlewares.use('/api/view', viewHandler as never); server.middlewares.use('/api/translate', translateHandler as never)
+  }
   return {
     name: 'trj-local-api',
-    configureServer(server) { server.middlewares.use('/api/plan', handler as never); server.middlewares.use('/api/view', viewHandler as never) },
-    configurePreviewServer(server) { server.middlewares.use('/api/plan', handler as never); server.middlewares.use('/api/view', viewHandler as never) },
+    configureServer(server) { use(server) },
+    configurePreviewServer(server) { use(server) },
   }
 }
 

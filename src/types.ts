@@ -146,6 +146,10 @@ export interface Trip {
   base?: string
   /** 사용자가 직접 고친 환율의 화폐들 (나머지는 어림값) */
   ratesEdited?: string[]
+  /**
+   * 함께 쓰는 사람을 위한 번역: 원래 글 → { en, ko }. 글을 쓴 기기가 만들어 넣어, 다른 사람은 기다리지 않고 자기 언어로 본다
+   */
+  tx?: Record<string, { en?: string; ko?: string }>
   budget: number // 원
   createdAt: number
   /** 여행 내용이 마지막으로 바뀐 시각 */

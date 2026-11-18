@@ -44,6 +44,7 @@ export function viewOf(t: Trip): Trip {
     expenses: t.expenses.map(({ u: _u, ...e }) => e),
     checklist: t.checklist.map(({ u: _u, ...c }) => c),
     journal: {},
+    tx: t.tx,
   }
 }
 

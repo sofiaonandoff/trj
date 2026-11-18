@@ -1,5 +1,5 @@
 import { tr } from '../i18n'
-import { tx, useTranslations } from '../lib/translate'
+import { prefetchTrip, translating, tx, useTranslations } from '../lib/translate'
 import { motion } from 'framer-motion'
 import { ArrowLeft, BookOpen, Copy, Download, Eye, Link2, ListChecks, MoreHorizontal, Route, Send, Share2, Smartphone, UserPlus, Wallet } from 'lucide-react'
 import { useEffect, useState } from 'react'
@@ -37,6 +37,8 @@ export default function TripPage({ id }: { id: string }) {
   const [people, setPeople] = useState(false)
   const [titleFocus, setTitleFocus] = useState(false)
   useTranslations()
+  // 여행을 열면 그 여행의 글을 한꺼번에 옮겨 둔다
+  useEffect(() => { prefetchTrip(useStore.getState().trips.find((t) => t.id === id)) }, [id])
   const [invites, setInvites] = useState<Invitee[]>()
   // 새 여행을 만들며 편집 권한을 준 동행이 있으면, 동행 관리를 열어 초대장을 보내게 한다
   useEffect(() => {
@@ -69,7 +71,7 @@ export default function TripPage({ id }: { id: string }) {
           <button className="icon-btn" aria-label={tr('여행 관리')} onClick={() => setManaging(true)}><MoreHorizontal size={22} /></button>
         </div>
         <div className="meta">
-          <p><span className="num">{badge}</span>{fmtRange(trip.start, trip.end)}</p>
+          <p><span className="num">{badge}</span>{fmtRange(trip.start, trip.end)}{translating() && <span className="tx-busy">{tr('번역 중')}</span>}</p>
           <span className="head-actions"><DriveChip compact /><button className="avatars-btn" onClick={() => setPeople(true)} aria-label={tr('동행 관리')}><Avatars members={trip.members} /><UserPlus size={15} /></button></span>
         </div>
       </header>

@@ -8,6 +8,7 @@ import { fetchView } from '../lib/drive'
 import { legOf } from '../lib/legs'
 import { decodeView } from '../lib/share'
 import { fetchShortView } from '../lib/viewLink'
+import { prefetchTrip, useTripTranslations } from '../lib/translate'
 import BudgetTab from './BudgetTab'
 import PrepTab from './PrepTab'
 import { arc, fmtDur, fmtRange, md, uid, weekday } from '../lib/util'
@@ -35,6 +36,8 @@ export default function ViewPage({ source }: { source: string }) {
   const [tab, setTab] = useState<ViewTab>('plan')
   const add = useStore((s) => s.add)
   useTranslations()
+  useTripTranslations(trip)
+  useEffect(() => { prefetchTrip(trip) }, [trip])
 
   const load = useCallback(async () => {
     if (snapshot) return
