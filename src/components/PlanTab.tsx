@@ -1,6 +1,6 @@
 import { tr } from '../i18n'
 import { Reorder, useDragControls } from 'framer-motion'
-import { BedDouble, Camera, Check, Clock, GripVertical, MapPin, Plane, Plus, Route, Sparkles, Trash2 } from 'lucide-react'
+import { BedDouble, Camera, Check, Clock, ExternalLink, GripVertical, MapPin, Plane, Plus, Route, Search, Sparkles, Trash2 } from 'lucide-react'
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { CORE_AIRPORTS, airlineOf, airport } from '../data/airports'
 import { CATEGORY, destination } from '../data/destinations'
@@ -402,24 +402,53 @@ function EditPlaceSheet({ trip, di, id, onClose, onMakeStay }: { trip: Trip; di:
   const source = trip.days[di]?.items.find((p) => p.id === id)
   const [d, setD] = useState<Place>()
   const [moveTo, setMoveTo] = useState(di)
+  // 위치: 이름·주소로 찾아 고르거나, 주소를 고치면 저장할 때 그 주소로 다시 찾는다
+  const [q, setQ] = useState('')
+  const [results, setResults] = useState<GeoResult[]>()
+  const [moved, setMoved] = useState<'none' | 'picked' | 'address'>('none')
+  const [saving, setSaving] = useState(false)
+  useEffect(() => {
+    if (q.trim().length < 2) { setResults(undefined); return }
+    const ac = new AbortController()
+    const near = legOf(trip, trip.days[moveTo]?.date ?? trip.start)
+    const t = setTimeout(() => { searchPlaces(q, near, ac.signal).then((x) => setResults(x.filter((y) => !y.airport).slice(0, 6))).catch(() => {}) }, 450)
+    return () => { clearTimeout(t); ac.abort() }
+  }, [q]) // eslint-disable-line react-hooks/exhaustive-deps
   // 전체 예약 비용: 예산의 지출과 묶인다
   const [cost, setCost] = useState('')
   const [currency, setCurrency] = useState(trip.currency)
   useEffect(() => {
     if (!source) return
-    setD({ ...source }); setMoveTo(di)
+    setD({ ...source }); setMoveTo(di); setQ(''); setResults(undefined); setMoved('none'); setSaving(false)
     const e = source.expenseId ? trip.expenses.find((x) => x.id === source.expenseId) : undefined
     setCost(e ? String(e.amount) : ''); setCurrency(e?.currency ?? trip.currency)
   }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
   const set = (patch: Partial<Place>) => setD((x) => (x ? { ...x, ...patch } : x))
 
-  const save = () => {
-    if (!d || !d.name.trim()) return
+  const save = async () => {
+    if (!d || !d.name.trim() || saving) return
+    let place = d
+    // 주소만 고쳤으면 그 주소로 지도 위치를 다시 찾는다
+    if (moved === 'address' && d.address?.trim()) {
+      setSaving(true)
+      const near = legOf(trip, trip.days[moveTo]?.date ?? trip.start)
+      const a = d.address.trim()
+      let hit: GeoResult | undefined
+      for (const query of [...new Set([a, a.replace(/^\s*\d+[\w/-]*\s+/, '')])]) {
+        const hits = (await searchPlaces(query, near).catch(() => [])).filter((x) => !x.airport)
+        hit = /,/.test(query) ? hits[0] : hits.find((x) => km(near, x) <= 150)
+        if (hit) break
+      }
+      setSaving(false)
+      if (hit) place = { ...d, lat: hit.lat, lng: hit.lng }
+      else toast(tr('주소로 지도 위치를 찾지 못해 위치는 그대로 두었습니다. 위치 검색에서 골라 보세요'))
+    }
+    const dd = place
     mutate(trip.id, (t) => {
       const items = t.days[di].items
       const i = items.findIndex((p) => p.id === d.id)
       if (i < 0) return
-      const p = { ...d, name: d.name.trim() }
+      const p = { ...dd, name: dd.name.trim(), address: dd.address?.trim() || undefined }
       const amount = Number(cost.replace(/[^\d.]/g, ''))
       const had = Boolean(p.expenseId)
       syncPlaceCost(t, p, t.days[moveTo].date, { amount: amount > 0 ? amount : 0, currency })
@@ -437,10 +466,32 @@ function EditPlaceSheet({ trip, di, id, onClose, onMakeStay }: { trip: Trip; di:
 
   return (
     <Sheet open={Boolean(id && d)} onClose={onClose} title={tr('장소 수정')}
-      foot={<><button className="btn btn-ghost" style={{ flex: 'none', color: 'var(--warn)' }} onClick={remove} aria-label={tr('장소 삭제')}><Trash2 size={18} /></button><button className="btn btn-primary" onClick={save}>{tr('변경 내용 저장')}</button></>}>
+      foot={<><button className="btn btn-ghost" style={{ flex: 'none', color: 'var(--warn)' }} onClick={remove} aria-label={tr('장소 삭제')}><Trash2 size={18} /></button><button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? tr('위치 찾는 중') : tr('변경 내용 저장')}</button></>}>
       {d && (
         <div className="stack">
           <label className="field"><span>{tr('이름')}</span><input value={d.name} onChange={(e) => set({ name: e.target.value })} /></label>
+
+          <div className="field"><span>{tr('위치')}</span>
+            <div className="input-btn">
+              <input value={q} placeholder={tr('장소 이름이나 주소로 위치 찾기')} onChange={(e) => setQ(e.target.value)} />
+              <a className="icon-btn" href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${d.lat},${d.lng}`)}`} target="_blank" rel="noopener" aria-label={tr('지금 위치를 지도에서 보기')}><ExternalLink size={16} /></a>
+            </div>
+          </div>
+          {results && results.length > 0 && (
+            <div className="list stay-results" style={{ marginTop: -6 }}>
+              {results.map((x, i) => (
+                <button key={i} onClick={() => { set({ lat: x.lat, lng: x.lng, address: x.detail ? `${x.name}, ${x.detail}` : x.name, ...(x.category === 'relax' ? { category: 'relax' as const } : {}) }); setMoved('picked'); setResults(undefined); setQ(''); toast(tr('위치를 {0}(으)로 옮깁니다. 저장하면 반영됩니다', x.name)) }}>
+                  <MapPin size={16} />
+                  <span className="grow"><b>{x.name}</b><small>{x.detail}</small></span>
+                </button>
+              ))}
+            </div>
+          )}
+          {q.trim().length >= 2 && !results && <p className="hint" style={{ marginTop: -6 }}><Search size={13} /> {tr('찾는 중')}</p>}
+          {results && !results.length && <p className="hint" style={{ marginTop: -6 }}>{tr('찾지 못했습니다. 영어 이름이나 주소로 찾아 보세요')}</p>}
+          <label className="field"><span>{tr('주소')}</span>
+            <input value={d.address ?? ''} placeholder={tr('예: 18 Beach Road, Kaikōura')} autoComplete="street-address" onChange={(e) => { set({ address: e.target.value || undefined }); setMoved('address') }} /></label>
+          <p className="hint" style={{ marginTop: -6 }}>{moved === 'picked' ? tr('고른 곳으로 위치가 바뀝니다.') : moved === 'address' ? tr('저장할 때 이 주소로 지도 위치를 다시 찾습니다.') : tr('위 검색에서 고르거나, 주소를 고치면 지도 위치가 바뀝니다.')}</p>
           <div className="row">
             <label className="field"><span>{tr('시작 시각')}</span><input type="time" value={d.time ?? ''} onChange={(e) => set({ time: e.target.value || undefined })} /></label>
             <label className="field"><span>{tr('머무는 시간(분)')}</span><input type="number" inputMode="numeric" min={0} step={15} value={d.duration ?? ''} onChange={(e) => set({ duration: e.target.value ? Number(e.target.value) : undefined })} /></label>

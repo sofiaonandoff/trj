@@ -73,6 +73,11 @@ check('투어 바우처: 이름·예약번호·날짜·오후 시각·자연 카
 const mr = readText(['-   [ME 한정] @ 페더데일 동물원 & 블루마운틴 선셋+별보기 투어 (프리미엄 일일투어) >', '뿔: 호주무한투어', '예약 취소                                            환불 규정 보기                이 예약만 취소               전체 예약 취소', '최종 환불 금액은 취소 완료시 안내됩니다.', '예약 내역', '이용일', '2026년 12월 12일 (토)', '성인(만14세~), [뉴페별]페더데일+블루마운틴 / 1개', '총 상품 금액                                                                     74,258원'].map((text, i) => ({ text, top: i * 40, height: 30 })), ['2026-12-11', '2026-12-12'], 'AUD')
 check('예약 내역 투어: 이름·이용일·금액·옵션·일일투어', mr.name === '페더데일 동물원 & 블루마운틴 선셋+별보기 투어 (프리미엄 일일투어)' && mr.date === '2026-12-12' && mr.amount === 74258 && mr.currency === 'KRW' && mr.expenseCategory === 'play'
   && mr.tour?.option === '성인(만14세~), [뉴페별]페더데일+블루마운틴 / 1개' && mr.tour?.duration === 480, mr)
+// 스파·온천: 이름으로 '스파·휴식' (예전에는 public_bath의 'pub'이 술집으로 잡혀 식사가 됐다)
+{
+  const { categoryByName } = await import('../src/data/destinations')
+  check('스파·온천은 스파·휴식', ['Polynesian Spa', '폴리네시안 스파', 'Hanmer Springs Thermal Pools', '하코네 온천', '찜질방', 'Day Spa Bangkok'].every((n) => categoryByName(n) === 'relax') && categoryByName('Spark Bar') === undefined && categoryByName('Sky Tower') === undefined)
+}
 const sk = findStayDates('예약 확정\n아바니 리버사이드 방콕 호텔\n체크인 2026.12.02 (수) 15:00\n체크아웃 2026.12.05 (토) 12:00', days)
 check('숙소 예약: 체크인·체크아웃 날짜와 시각', JSON.stringify(sk) === JSON.stringify({ checkIn: '2026-12-02', checkOut: '2026-12-05', inTime: '15:00', outTime: '12:00' }), sk)
 const se = findStayDates('Riva Surya Bangkok Hotel\nCheck-in: Thursday, December 3, 2026\nCheck-out: Saturday, December 5, 2026', days)

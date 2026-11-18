@@ -181,6 +181,12 @@ const RAW: Destination[] = [
 /** 도시·나라·소개 문구는 고른 언어로 바꿔 내보낸다 */
 export const DESTINATIONS: Destination[] = RAW.map((d) => ({ ...d, city: tr(d.city), country: tr(d.country), line: tr(d.line), plug: tr(d.plug) }))
 
+/** 이름만 보고 분명한 종류: 스파·온천·사우나·마사지는 '스파·휴식' (Polynesian Spa, 하코네 온천, 찜질방) */
+export function categoryByName(name: string): Category | undefined {
+  if (/\bspa\b|스파|온천|온센|hot\s*springs?|hot\s*pools?|thermal|sauna|사우나|찜질|onsen|hammam|massage|마사지|wellness|day\s*spa|노천탕|족욕|목욕탕|bathhouse|溫泉|温泉|スパ/i.test(name)) return 'relax'
+  return undefined
+}
+
 export const destination = (id?: string) => DESTINATIONS.find((d) => d.id === id)
 
 export const CATEGORY: Record<Category, { label: string; color: string }> = {
@@ -190,6 +196,7 @@ export const CATEGORY: Record<Category, { label: string; color: string }> = {
   shop: { label: tr('쇼핑'), color: '#96506A' },
   nature: { label: tr('자연'), color: '#5C7F4E' },
   culture: { label: tr('문화'), color: '#5E5A86' },
+  relax: { label: tr('스파·휴식'), color: '#3F7F86' },
   night: { label: tr('밤'), color: '#3E4A5C' },
   stay: { label: tr('숙소'), color: '#7A8580' },
   move: { label: tr('교통'), color: '#3E6B8A' },

@@ -173,7 +173,7 @@ function Day({ trip, idx, setIdx }: { trip: Trip; idx: number; setIdx: (i: numbe
                     <div className="tl-rail"><span className="tl-node">{e.index + 1}</span></div>
                     <div className="tl-body">
                       <div className="card">
-                        <button className="card-main" onClick={() => maps(p.name, p)} aria-label={tr('{0} 지도에서 보기', p.name)}>
+                        <button className="card-main" onClick={() => maps(p.address || p.name, p.address ? undefined : p)} aria-label={tr('{0} 지도에서 보기', p.name)}>
                           <h3>{p.name}</h3>
                           <div className="sub"><span className="cat" style={{ color: c.color }}>{c.label}</span>{p.duration ? <span>{fmtDur(p.duration)}</span> : null}<span className="map-hint"><MapPin size={12} />{tr('지도')}</span></div>
                           {p.note && <div className="note">{p.note}</div>}

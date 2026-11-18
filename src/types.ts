@@ -1,4 +1,4 @@
-export type Category = 'sight' | 'food' | 'cafe' | 'shop' | 'nature' | 'culture' | 'night' | 'stay' | 'move'
+export type Category = 'sight' | 'food' | 'cafe' | 'shop' | 'nature' | 'culture' | 'relax' | 'night' | 'stay' | 'move'
 
 export interface Place {
   /** 마지막으로 고친 시각(ms). 기기 간 병합에 쓴다 */
@@ -11,6 +11,8 @@ export interface Place {
   time?: string // HH:MM
   duration?: number // 분
   cost?: number // 원 (1인 예상, AI 추천이 넣는 어림값. 예산에는 들어가지 않는다)
+  /** 주소 (투어 미팅 포인트 등). 지도 위치를 찾을 때와 길 안내에 쓴다 */
+  address?: string
   /** 이 장소의 예약 비용으로 예산에 기록한 지출 (장소와 함께 고쳐지고 지워진다) */
   expenseId?: string
   note?: string

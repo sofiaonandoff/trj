@@ -1,4 +1,5 @@
 import { AIRPORTS } from '../data/airports'
+import { categoryByName } from '../data/destinations'
 import { lang, tr } from '../i18n'
 import { EN } from '../i18n.en'
 import type { Category } from '../types'
@@ -17,7 +18,9 @@ export interface GeoResult {
 }
 
 const guess = (cls: string, type: string): Category => {
-  if (/restaurant|fast_food|food_court|bar|pub/.test(type)) return 'food'
+  // 낱말 전체로 비교한다 ('public_bath'의 pub이 술집으로, 'sauna'가 다른 것으로 잡히지 않게)
+  if (/^(spa|sauna|public_bath|hot_spring|massage|swimming_area|water_park|bath)$/.test(type) || cls === 'healthcare' && type === 'massage') return 'relax'
+  if (/^(restaurant|fast_food|food_court|bar|pub|biergarten|ice_cream)$/.test(type)) return 'food'
   if (/cafe|bakery/.test(type)) return 'cafe'
   if (cls === 'shop' || /mall|marketplace/.test(type)) return 'shop'
   if (/park|garden|beach|peak|forest|nature/.test(type) || cls === 'natural') return 'nature'
@@ -77,7 +80,7 @@ export async function searchPlaces(q: string, near?: { lat: number; lng: number 
     return {
       name, local: local && local !== name ? local : undefined,
       detail: parts.slice(1, 4).join(', '), lat: Number(r.lat), lng: Number(r.lon),
-      country: r.address?.country ?? '', category: guess(r.category ?? '', r.type ?? ''),
+      country: r.address?.country ?? '', category: categoryByName(r.name ?? r.display_name) ?? guess(r.category ?? '', r.type ?? ''),
     }
   })
   // 앱이 아는 공항은 맨 위에, 같은 공항이 검색 결과에 또 나오면 빼낸다
@@ -96,7 +99,7 @@ export async function reverseGeocode(lat: number, lng: number): Promise<GeoResul
   const nd = r.namedetails ?? {}
   const parts = r.display_name.split(', ')
   const name = nd[`name:${lang}`] ?? nd['name:en'] ?? nd.int_name ?? r.name ?? parts[0]
-  return { name, detail: parts.slice(1, 4).join(', '), lat, lng, country: r.address?.country ?? '', category: guess(r.category ?? '', r.type ?? '') }
+  return { name, detail: parts.slice(1, 4).join(', '), lat, lng, country: r.address?.country ?? '', category: categoryByName(name) ?? guess(r.category ?? '', r.type ?? '') }
 }
 
 /** 화면 언어로 읽을 수 없는 이름인가 (한국어 화면에 한글이 없거나, 영어 화면에 라틴 문자가 아닌 글자가 있으면) */

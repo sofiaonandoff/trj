@@ -1,4 +1,5 @@
 import { lang, tr } from '../i18n'
+import { categoryByName } from '../data/destinations'
 import type { Category, Day, Place, Trip } from '../types'
 import { legOf } from './legs'
 import { dateRange, km, uid } from './util'
@@ -41,7 +42,7 @@ async function call<T>(body: { mode: string; [k: string]: unknown }): Promise<T>
   } finally { clearTimeout(timer) }
 }
 
-const CATS: Category[] = ['sight', 'food', 'cafe', 'shop', 'nature', 'culture', 'night', 'stay']
+const CATS: Category[] = ['sight', 'food', 'cafe', 'shop', 'nature', 'culture', 'relax', 'night', 'stay']
 type Raw = Record<string, unknown>
 
 /** 모델이 준 값을 그대로 믿지 않고 형식과 범위를 확인해 장소로 만든다 */
@@ -56,7 +57,7 @@ function toPlace(r: Raw, center?: { lat: number; lng: number }): Place | null {
   const note = typeof r.note === 'string' ? r.note.trim().slice(0, 120) : ''
   return {
     id: uid(), name, lat, lng,
-    category: CATS.includes(r.category as Category) ? (r.category as Category) : 'sight',
+    category: categoryByName(name) ?? (CATS.includes(r.category as Category) ? (r.category as Category) : 'sight'),
     time: typeof r.start === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(r.start) ? r.start : undefined,
     duration: Number.isFinite(duration) ? Math.min(600, Math.max(15, duration)) : 60,
     cost: Number.isFinite(cost) && cost > 0 ? cost : undefined,

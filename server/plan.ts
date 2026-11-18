@@ -11,7 +11,7 @@ export interface PlanEnv {
 }
 export interface PlanResult { status: number; json: unknown }
 
-const CATEGORIES = ['sight', 'food', 'cafe', 'shop', 'nature', 'culture', 'night', 'stay'] as const
+const CATEGORIES = ['sight', 'food', 'cafe', 'shop', 'nature', 'culture', 'relax', 'night', 'stay'] as const
 const PACE = { slow: '2 to 3', normal: 'about 4', full: '5 or 6' } as const
 /** 앞에서부터 시도한다. 모델 이름이 바뀌어 없어졌으면 다음 것으로 넘어간다 */
 const MODELS = ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.5-flash-lite']

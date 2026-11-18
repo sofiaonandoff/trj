@@ -233,7 +233,7 @@ export async function readTripPhoto(file: File, trip: Trip, current: string, onS
     ].filter(Boolean).join('\n')
     out.push({
       date, dateFrom: from, expense,
-      place: { id: uid(), name, ...loc, category: r.category, note: note || undefined, time: r.time, duration: tour.duration ?? 120 },
+      place: { id: uid(), name, ...loc, address: tour.address, category: r.category, note: note || undefined, time: r.time, duration: tour.duration ?? 120 },
     })
     return out
   }

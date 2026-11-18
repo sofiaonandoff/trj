@@ -15,7 +15,7 @@ import type { Category } from '../types'
 import { go, toast } from './ui'
 import { announceInvites, type Invitee } from '../lib/invite'
 
-const INTERESTS: Category[] = ['food', 'cafe', 'sight', 'culture', 'nature', 'shop', 'night']
+const INTERESTS: Category[] = ['food', 'cafe', 'sight', 'culture', 'nature', 'relax', 'shop', 'night']
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 /** 고른 도시 하나. 같은 도시를 다시 넣을 수 있다 (방콕 → 콘깬 → 방콕) */

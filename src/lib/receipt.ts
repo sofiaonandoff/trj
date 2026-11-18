@@ -1,4 +1,5 @@
 import { lang, tr } from '../i18n'
+import { categoryByName } from '../data/destinations'
 import type { Category, ExpenseCategory, Flight } from '../types'
 import { AIRLINES, AIRPORTS, airportByCity } from '../data/airports'
 import { isComplete, parseFlightText } from './flight'
@@ -328,6 +329,7 @@ export function findTotal(lines: string[]): number | undefined {
 const KINDS: { re: RegExp; cat: Category; exp: ExpenseCategory; costOnly?: boolean }[] = [
   { re: /hotel|hostel|resort|check[\s-]?in|check[\s-]?out|\b\d+\s*(?:x\s*)?rooms?\b|add rooms|\b\d+\s*nights?\b|객실\s*\d|\d\s*박\b|호텔|숙박|숙소|체크\s*인|호스트|에어비앤비|리조트|게스트하우스|ホテル|旅館|โรงแรม|airbnb|agoda|booking\.com|게스트\s*\d+\s*명|\d+\s*guests?\b|저택|호실|별채|펜션|민박|빌라|콘도|아파트|단독\s*주택|공동\s*주택|집\s*전체|개인실|게스트용|타운하우스|캐빈|오두막|entire\s+(home|place|rental)|guest\s*suite|guesthouse|private\s+room|room\s+in|apartment|condo|villa|cottage|cabin|bungalow|townhouse|loft/i, cat: 'stay', exp: 'stay' },
   { re: /taxi|grab|bolt|uber|bts|mrt|metro|subway|railway|train|bus|ferry|택시|지하철|버스|기차|열차|교통|suica|pasmo|タクシー|電車|แท็กซี่|รถไฟ/i, cat: 'sight', exp: 'move', costOnly: true },
+  { re: /\bspa\b|스파|온천|hot\s*pools?|sauna|사우나|찜질|massage|마사지|onsen|温泉/i, cat: 'relax', exp: 'play' },
   { re: /cafe|café|coffee|starbucks|카페|커피|喫茶|カフェ|กาแฟ|bakery|베이커리/i, cat: 'cafe', exp: 'food' },
   { re: /restaurant|bistro|kitchen|ramen|sushi|bbq|bar\b|pub|식당|레스토랑|음식|라멘|스시|食堂|レストラン|ร้านอาหาร|food|noodle|menu|국수|교자|김밥|찌개|국밥|치킨|고기|ラーメン|うどん|そば|寿司|居酒屋|ก๋วยเตี๋ยว|phở/i, cat: 'food', exp: 'food' },
   { re: /admission|entrance|museum|ticket|tour|입장|관람|박물관|미술관|투어|入場|チケット|ค่าเข้า/i, cat: 'culture', exp: 'play' },
@@ -614,7 +616,7 @@ export function readText(all: OcrLine[], days: string[], tripCurrency: string): 
     time: findTime(lines.filter((l) => /시간|시각|time|체크\s*인|check[\s-]*in|입장|時/i.test(l.text)).map((l) => l.text).join('\n')) ?? findTime(body.map((l) => l.text).join('\n')),
     amount,
     currency: amount ? findCurrency(text, guessCur) : undefined,
-    category: kind?.cat ?? 'sight',
+    category: (tour?.name && categoryByName(tour.name)) || (kind?.cat ?? 'sight'),
     expenseCategory: kind?.exp ?? (amount ? 'etc' : 'play'),
     costOnly: Boolean(kind?.costOnly),
     flights,
