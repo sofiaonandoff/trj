@@ -6,6 +6,7 @@ import { execSync } from 'node:child_process'
 /** 화면 아래에 보여 줄 빌드 버전: Cloudflare가 주는 커밋, 없으면 로컬 git */
 const version = (process.env.CF_PAGES_COMMIT_SHA ?? (() => { try { return execSync('git rev-parse HEAD').toString() } catch { return 'dev' } })()).trim().slice(0, 7)
 import { handlePlan, type PlanEnv } from './server/plan'
+import { handleView, memoryStore } from './server/view'
 
 /**
  * 로컬(npm run dev / preview)에서도 /api/plan이 동작하게 한다.
@@ -28,10 +29,26 @@ function localApi(env: PlanEnv): Plugin {
       res.end(JSON.stringify(r.json))
     })
   }
+  // 보기 링크: 로컬에서는 메모리에 둔다 (서버를 다시 켜면 사라진다)
+  const views = memoryStore()
+  type VReq = Req & { url?: string; headers: Record<string, string | undefined> }
+  const viewHandler = (req: VReq, res: Res) => {
+    let raw = ''
+    req.on('data', (chunk) => { raw += String(chunk) })
+    req.on('end', async () => {
+      let body: unknown = null
+      try { body = raw ? JSON.parse(raw) : null } catch { /* 400 */ }
+      const id = (req.url ?? '').replace(/^\/+/, '').split(/[/?]/)[0]
+      const r = await handleView(req.method ?? 'GET', id, body, req.headers['x-view-token'] ?? null, views)
+      res.statusCode = r.status
+      res.setHeader('Content-Type', 'application/json')
+      res.end(JSON.stringify(r.json))
+    })
+  }
   return {
     name: 'trj-local-api',
-    configureServer(server) { server.middlewares.use('/api/plan', handler as never) },
-    configurePreviewServer(server) { server.middlewares.use('/api/plan', handler as never) },
+    configureServer(server) { server.middlewares.use('/api/plan', handler as never); server.middlewares.use('/api/view', viewHandler as never) },
+    configurePreviewServer(server) { server.middlewares.use('/api/plan', handler as never); server.middlewares.use('/api/view', viewHandler as never) },
   }
 }
 

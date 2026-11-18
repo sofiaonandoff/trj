@@ -89,9 +89,11 @@ const both = (A: Trip, B: Trip) => {
   full.members[0].email = 'me@gmail.com'
   full.flights = [{ id: 'f', flightNo: 'NZ501', from: 'AKL', to: 'CHC', depDate: '2026-12-01', depTime: '13:05', arrDate: '2026-12-01', arrTime: '14:30', pnr: 'VAG3BH', seat: '12A' }]
   full.days[0].items[0].cost = 30000
+  full.journal['2026-12-01'] = { text: '비밀 일기', photos: [] }
   const v = viewOf(full), json = JSON.stringify(v)
-  check('9 보기 링크: 일정·항공편은 남고 지출·준비물·이메일·예약번호·좌석·비용은 빠진다',
-    v.days[0].items.length === 3 && v.flights[0].flightNo === 'NZ501' && !v.expenses.length && !v.checklist.length && !/me@gmail|VAG3BH|12A|30000/.test(json), json)
+  check('9 보기 링크: 일정·항공편·지출·준비물은 남고 이메일·예약번호·좌석·기록은 빠진다',
+    v.days[0].items.length === 3 && v.flights[0].flightNo === 'NZ501' && v.expenses.length === 1 && v.checklist.length === 2 && v.days[0].items[0].cost === 30000
+    && !/me@gmail|VAG3BH|12A|비밀 일기/.test(json), json)
 }
 console.log(fails ? `\n${fails}개 실패` : '\n모두 통과')
 process.exit(fails ? 1 : 0)

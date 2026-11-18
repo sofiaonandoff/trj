@@ -36,7 +36,8 @@ function settle(trip: Trip, toWon: (e: Expense) => number) {
   return out
 }
 
-export default function BudgetTab({ trip }: { trip: Trip }) {
+/** readOnly: 로그인 없이 보는 링크에서 쓴다 (고치는 칸과 버튼을 숨긴다) */
+export default function BudgetTab({ trip, readOnly = false }: { trip: Trip; readOnly?: boolean }) {
   const mutate = useStore((s) => s.mutate)
   const [edit, setEdit] = useState<Expense | 'new'>()
   const toWon = (e: Expense) => e.amount * (e.currency === 'KRW' ? 1 : trip.rate)
@@ -59,14 +60,16 @@ export default function BudgetTab({ trip }: { trip: Trip }) {
           {byCat.map(({ c, v }) => <i key={c} style={{ width: `${(v / Math.max(total, trip.budget || 0)) * 100}%`, background: CAT[c].color }} />)}
         </div>
         <div className="legend">{byCat.map(({ c, v }) => <span key={c}><i className="dot" style={{ background: CAT[c].color }} />{CAT[c].label} {won(v)}</span>)}</div>
-        <div className="row" style={{ marginTop: 16 }}>
+        {readOnly ? (
+          <p className="hint">{trip.budget > 0 ? tr('전체 예산 {0}', won(trip.budget)) : null}{foreign && trip.rate ? `${trip.budget > 0 ? ' · ' : ''}${tr('환율 (1 {0} = 원)', trip.currency)} ${trip.rate}` : null}</p>
+        ) : <div className="row" style={{ marginTop: 16 }}>
           <label className="field"><span>{tr('전체 예산(원)')}</span>
             <input type="number" inputMode="numeric" min={0} step={10000} value={trip.budget || ''} placeholder={tr('정하지 않음')} onChange={(e) => mutate(trip.id, (t) => { t.budget = Number(e.target.value) || 0 })} /></label>
           {foreign && <label className="field"><span>{tr('환율 (1 {0} = 원)', trip.currency)}</span>
             <input type="number" inputMode="decimal" min={0} step="any" value={trip.rate} onChange={(e) => mutate(trip.id, (t) => { t.rate = Number(e.target.value) || 0 })} /></label>}
-        </div>
+        </div>}
         {trip.budget > 0 && <p className="hint">{over ? tr('예산을 {0} 넘었습니다', won(total - trip.budget)) : tr('예산이 {0} 남았습니다', won(trip.budget - total))}</p>}
-        {foreign && <p className="hint">{tr('환율은 어림값으로 들어가 있습니다. 실제 환전·결제 환율로 고쳐 쓰세요.')}</p>}
+        {foreign && !readOnly && <p className="hint">{tr('환율은 어림값으로 들어가 있습니다. 실제 환전·결제 환율로 고쳐 쓰세요.')}</p>}
       </section>
 
       {trip.members.length > 1 && transfers.length > 0 && (
@@ -87,7 +90,7 @@ export default function BudgetTab({ trip }: { trip: Trip }) {
         {trip.expenses.length ? (
           <div className="list">
             {[...trip.expenses].sort((a, b) => b.date.localeCompare(a.date)).map((e) => (
-              <button key={e.id} onClick={() => setEdit(e)}>
+              <button key={e.id} onClick={() => !readOnly && setEdit(e)} disabled={readOnly} className={readOnly ? 'static' : undefined}>
                 <i className="dot" style={{ background: CAT[e.category].color }} />
                 <span className="grow"><b>{e.title}</b><small>{tr('{0} · {1} 결제 · {2}명', md(e.date), name(e.payer)?.name ?? '?', e.split.length)}</small></span>
                 <span style={{ textAlign: 'right' }}>
@@ -97,11 +100,11 @@ export default function BudgetTab({ trip }: { trip: Trip }) {
               </button>
             ))}
           </div>
-        ) : <div className="empty"><strong>{tr('기록한 지출이 없습니다')}</strong>{tr('결제한 사람과 나눌 사람을 고르면 정산까지 계산합니다.')}</div>}
-        <button className="btn btn-primary btn-block" style={{ marginTop: 14 }} onClick={() => setEdit('new')}><Plus size={18} />{tr('지출 기록')}</button>
+        ) : <div className="empty"><strong>{tr('기록한 지출이 없습니다')}</strong>{readOnly ? null : tr('결제한 사람과 나눌 사람을 고르면 정산까지 계산합니다.')}</div>}
+        {!readOnly && <button className="btn btn-primary btn-block" style={{ marginTop: 14 }} onClick={() => setEdit('new')}><Plus size={18} />{tr('지출 기록')}</button>}
       </section>
 
-      <ExpenseSheet trip={trip} edit={edit} onClose={() => setEdit(undefined)} />
+      {!readOnly && <ExpenseSheet trip={trip} edit={edit} onClose={() => setEdit(undefined)} />}
     </>
   )
 }

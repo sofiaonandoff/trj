@@ -8,7 +8,8 @@ import type { Trip } from '../types'
 import Companions from './Companions'
 import { Avatar, toast } from './ui'
 
-export default function PrepTab({ trip }: { trip: Trip }) {
+/** readOnly: 로그인 없이 보는 링크에서 쓴다 */
+export default function PrepTab({ trip, readOnly = false }: { trip: Trip; readOnly?: boolean }) {
   const mutate = useStore((s) => s.mutate)
   const [text, setText] = useState('')
   const [group, setGroup] = useState(tr('짐'))
@@ -58,22 +59,23 @@ export default function PrepTab({ trip }: { trip: Trip }) {
             const who = trip.members.find((m) => m.id === c.assignee)
             return (
               <div key={c.id} className={`check${c.done ? ' done' : ''}`}>
-                <button className="box" role="checkbox" aria-checked={c.done} aria-label={c.text}
+                <button className="box" role="checkbox" aria-checked={c.done} aria-label={c.text} disabled={readOnly}
                   onClick={() => { haptic(); mutate(trip.id, (t) => { const x = t.checklist.find((y) => y.id === c.id)!; x.done = !x.done }) }}><Check size={16} strokeWidth={3} /></button>
                 <span>{c.text}</span>
-                {trip.members.length > 1 && (
+                {readOnly ? (who ? <Avatar m={who} /> : null) : trip.members.length > 1 && (
                   <button onClick={() => cycle(c.id)} aria-label={tr('담당: {0}. 눌러서 바꾸기', who?.name ?? tr('없음'))}>
                     {who ? <Avatar m={who} /> : <span className="avatar" style={{ background: 'var(--sunk)', color: 'var(--mute)' }}>+</span>}
                   </button>
                 )}
-                <button className="mute" aria-label={tr('{0} 삭제', c.text)} onClick={() => mutate(trip.id, (t) => { t.checklist = t.checklist.filter((x) => x.id !== c.id) })}><X size={16} /></button>
+                {!readOnly && <button className="mute" aria-label={tr('{0} 삭제', c.text)} onClick={() => mutate(trip.id, (t) => { t.checklist = t.checklist.filter((x) => x.id !== c.id) })}><X size={16} /></button>}
               </div>
             )
           })}
         </section>
       ))}
 
-      <section className="panel">
+      {trip.checklist.length === 0 && readOnly && <div className="empty">{tr('적어 둔 준비물이 없습니다')}</div>}
+      {!readOnly && <><section className="panel">
         <h2>{tr('준비물 추가')}</h2>
         <div className="chips">
           {[...new Set([...groups, tr('짐'), tr('서류'), tr('전자기기')])].map((g) => <button key={g} className="chip" aria-pressed={group === g} onClick={() => setGroup(g)}>{g}</button>)}
@@ -94,6 +96,7 @@ export default function PrepTab({ trip }: { trip: Trip }) {
         <p className="hint">{tr('동행 추가·빼기와 이메일 초대는 동행 관리에서 합니다. 여행 화면 위의 얼굴 아이콘으로도 열 수 있습니다.')}</p>
       </section>
       <Companions trip={trip} open={people} onClose={() => setPeople(false)} />
+      </>}
     </>
   )
 }

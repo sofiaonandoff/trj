@@ -39,7 +39,7 @@
     <ul>
       <li><b>이 기기</b>: 여행 일정, 항공편, 예산, 준비물, 기록 글과 사진은 사용하는 브라우저 안(localStorage, IndexedDB)에 저장됩니다.</li>
       <li><b>사용자의 Google Drive</b>: Drive 저장을 켠 경우에만, 여행 내용과 기록 사진을 사용자 본인의 Google Drive에 있는 <code>TRJ</code> 폴더에 파일로 저장합니다. 함께 편집하는 여행의 사진은 동행이 볼 수 있도록 '링크가 있는 사람은 보기 가능'으로 설정되며, 링크 주소는 그 여행 파일에만 기록됩니다.</li>
-      <li>운영자는 위 정보를 받거나 볼 수 없습니다.</li>
+      <li>운영자는 위 정보를 받거나 볼 수 없습니다. 단, 사용자가 '보기 링크'를 만든 여행은 아래 4항처럼 앱 서버에 저장됩니다.</li>
     </ul>
 
     <h2>2. Google 계정 데이터 사용</h2>
@@ -61,7 +61,7 @@
     </ul>
 
     <h2>4. 공유</h2>
-    <p>'고칠 수 있는 사본'과 '지금 일정 그대로 보내기' 링크는 여행 내용(사진 제외)을 링크 주소 안에 담습니다. '보기 링크'를 만들면 날짜별 장소·항공편·숙소만 담은 보기 파일(지출·준비물·이메일·예약번호 제외)을 사용자의 Drive <code>TRJ</code> 폴더에 만들고 '링크가 있는 사람은 보기 가능'으로 엽니다. 보기 링크를 끄면 그 파일을 지웁니다. 어느 링크든 받은 사람은 그 내용을 볼 수 있으니 공유할 상대를 확인하세요.</p>
+    <p>'고칠 수 있는 사본' 링크는 여행 내용(사진 제외)을 링크 주소 안에 담습니다. '보기 링크'를 만들면 날짜별 장소·항공편·숙소·지출·준비물과 동행 이름을 앱 서버(Cloudflare KV)에 저장하고 짧은 링크를 만듭니다. 동행 이메일·예약번호·좌석·기록(글과 사진)은 담지 않습니다. 여행을 고치면 저장된 내용도 바뀌고, 보기 링크를 끄면 지워집니다. 400일 동안 고치지 않으면 자동으로 지워집니다. 어느 링크든 받은 사람은 그 내용을 볼 수 있으니 공유할 상대를 확인하세요.</p>
 
     <h2>5. 삭제</h2>
     <ul>
@@ -82,7 +82,7 @@
     <ul>
       <li><b>This device</b>: itineraries, flights, budgets, packing lists, journal text and photos are stored in your browser (localStorage, IndexedDB).</li>
       <li><b>Your Google Drive</b>: only if you turn on Drive saving, trip contents and journal photos are saved as files in a <code>TRJ</code> folder in your own Google Drive. Photos in a co-edited trip are set to "anyone with the link can view" so companions can see them; the links are recorded only in that trip file.</li>
-      <li>The operator does not receive or see this information.</li>
+      <li>The operator does not receive or see this information, except for trips you create a "view link" for, which are stored on the app server as described in section 4.</li>
     </ul>
 
     <h2>2. Use of Google user data</h2>
@@ -104,7 +104,7 @@
     </ul>
 
     <h2>4. Sharing</h2>
-    <p>"Editable copy" and "send the plan as it is now" links carry the trip contents (without photos) inside the link itself. A "view link" creates a view file with only the daily places, flights and stays (no expenses, checklist, emails or booking numbers) in the <code>TRJ</code> folder of your Drive and sets it to "anyone with the link can view"; turning the view link off deletes that file. Anyone with any of these links can see their contents, so check who you send them to.</p>
+    <p>An "editable copy" link carries the trip contents (without photos) inside the link itself. A "view link" stores the daily places, flights, stays, expenses, checklist and companion names on the app server (Cloudflare KV) behind a short link. Companion emails, booking numbers, seats and the journal (text and photos) are not included. Edits to the trip update it, turning the view link off deletes it, and it is deleted automatically after 400 days without edits. Anyone with any of these links can see their contents, so check who you send them to.</p>
 
     <h2>5. Deletion</h2>
     <ul>

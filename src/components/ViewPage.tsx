@@ -1,11 +1,14 @@
 import { tr } from '../i18n'
-import { Download, Eye, MapPin, RefreshCw } from 'lucide-react'
+import { Download, Eye, ListChecks, MapPin, RefreshCw, Route, Wallet } from 'lucide-react'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { CATEGORY } from '../data/destinations'
 import { dayLine, nextStops, routeSegments } from '../lib/dayline'
 import { fetchView } from '../lib/drive'
 import { legOf } from '../lib/legs'
 import { decodeView } from '../lib/share'
+import { fetchShortView } from '../lib/viewLink'
+import BudgetTab from './BudgetTab'
+import PrepTab from './PrepTab'
 import { arc, fmtDur, fmtRange, md, uid, weekday } from '../lib/util'
 import { useStore } from '../store'
 import type { Trip } from '../types'
@@ -18,20 +21,25 @@ const maps = (q: string, ll?: { lat: number; lng: number }) =>
   open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ll ? `${q} ${ll.lat},${ll.lng}` : q)}`, '_blank', 'noopener')
 
 /**
- * 로그인 없이 보는 일정 (#/view/<보기 파일 id> 또는 #/view/s/<주소에 담은 일정>).
- * 고칠 수는 없고, 보기 파일 링크는 주인이 고친 내용이 1분마다 반영된다.
+ * 로그인 없이 보는 여행: #/v/<짧은 id> (앱 서버), #/view/<Drive 보기 파일 id>, #/view/s/<주소에 담은 일정>.
+ * 일정·예산·준비물을 볼 수 있고 고칠 수는 없다. 짧은 링크와 Drive 링크는 1분마다 새로 받는다.
  */
+type ViewTab = 'plan' | 'budget' | 'prep'
 export default function ViewPage({ source }: { source: string }) {
   const snapshot = source.startsWith('s/')
   const [trip, setTrip] = useState<Trip | null | undefined>(() => (snapshot ? decodeView(source.slice(2)) : undefined))
   const [loadedAt, setLoadedAt] = useState(0)
   const [error, setError] = useState('')
   const [idx, setIdx] = useState(0)
+  const [tab, setTab] = useState<ViewTab>('plan')
   const add = useStore((s) => s.add)
 
   const load = useCallback(async () => {
     if (snapshot) return
-    try { const t = await fetchView(source); setTrip(t); setLoadedAt(Date.now()); setError('') } catch (e) { setError((e as Error).message) }
+    try {
+      const t = source.startsWith('k/') ? (await fetchShortView(source.slice(2)))?.trip ?? null : await fetchView(source)
+      setTrip(t); setLoadedAt(Date.now()); setError('')
+    } catch (e) { setError((e as Error).message) }
   }, [snapshot, source])
 
   useEffect(() => {
@@ -80,7 +88,16 @@ export default function ViewPage({ source }: { source: string }) {
           {!snapshot && <button className="view-refresh" onClick={() => void load()} aria-label={tr('새로 고침')}><RefreshCw size={13} />{loadedAt ? clock(loadedAt) : ''}</button>}
         </p>
       </>}>
-      <main className="trip-main"><Day trip={trip} idx={idx} setIdx={setIdx} /></main>
+      <nav className="view-tabs" role="tablist" aria-label={tr('여행 메뉴')}>
+        {([['plan', tr('일정'), Route], ['budget', tr('예산'), Wallet], ['prep', tr('준비'), ListChecks]] as const).map(([id, label, Icon]) => (
+          <button key={id} role="tab" aria-selected={tab === id} onClick={() => { setTab(id); scrollTo(0, 0) }}><Icon size={17} />{label}</button>
+        ))}
+      </nav>
+      <main className="trip-main">
+        {tab === 'plan' && <Day trip={trip} idx={idx} setIdx={setIdx} />}
+        {tab === 'budget' && <BudgetTab trip={trip} readOnly />}
+        {tab === 'prep' && <PrepTab trip={trip} readOnly />}
+      </main>
       <div className="view-foot">
         <button className="btn btn-ghost" onClick={keep}><Download size={18} />{tr('내 여행으로 담기')}</button>
         <button className="btn btn-quiet" onClick={() => go('/')}>{tr('trj에서 내 여행 짜기')}</button>

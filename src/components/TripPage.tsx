@@ -3,7 +3,8 @@ import { motion } from 'framer-motion'
 import { ArrowLeft, BookOpen, Copy, Download, Eye, Link2, ListChecks, MoreHorizontal, Route, Send, Share2, UserPlus, Wallet } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { onAnnounced, takeAnnounced, type Invitee } from '../lib/invite'
-import { shareLink, snapshotViewLink } from '../lib/share'
+import { shareLink } from '../lib/share'
+import { NoViewServer, createViewLink, onViewLinks, removeViewLink, savedViewLink, shortViewLink } from '../lib/viewLink'
 import { driveConfigured, startViewLink, stopViewLink, viewLink } from '../lib/drive'
 import { diffDays, download, fmtRange, haptic, today } from '../lib/util'
 import { useStore } from '../store'
@@ -118,41 +119,52 @@ function ShareSheet({ trip, open, onClose, onJournal, onManage }: { trip: Trip; 
   )
 }
 
-/** 로그인 없이 보는 링크. 받는 사람은 앱 설치·로그인 없이 일정·항공편·숙소를 본다 */
+/**
+ * 로그인 없이 보는 링크. 짧은 주소(#/v/…)로 일정·예산·준비물을 보여 주고, 고치면 1분 안팎으로 반영된다.
+ * 앱 서버에 보기 저장소가 없는 배포에서는 Google Drive 보기 파일로 대신 만든다.
+ */
 function ViewLink({ trip }: { trip: Trip }) {
   const [busy, setBusy] = useState(false)
-  const v = trip.drive?.view
+  const [, rerender] = useState(0)
+  useEffect(() => onViewLinks(() => rerender((n) => n + 1)), [])
+  const saved = savedViewLink(trip.id)
+  const drive = trip.drive?.view
   const owner = trip.drive?.role !== 'editor'
-  const send = async (url: string) => {
+  const url = saved ? shortViewLink(saved.id) : drive ? viewLink(drive.fileId) : ''
+  const send = async (link: string) => {
     const text = tr('{0} 일정이에요. 로그인 없이 볼 수 있어요', trip.title)
-    if (navigator.share) { try { await navigator.share({ title: trip.title, text, url }); return } catch { /* 닫으면 복사로 */ } }
-    copy(url, tr('보기 링크를 복사했습니다'))
+    if (navigator.share) { try { await navigator.share({ title: trip.title, text, url: link }); return } catch { /* 닫으면 복사로 */ } }
+    copy(link, tr('보기 링크를 복사했습니다'))
   }
   const run = async (fn: () => Promise<unknown>) => { setBusy(true); try { await fn() } catch (e) { toast((e as Error).message) } finally { setBusy(false) } }
-  const make = () => run(async () => { const id = await startViewLink(trip.id); toast(tr('보기 링크를 만들었습니다')); await send(viewLink(id)) })
-  const stop = () => run(async () => { await stopViewLink(trip.id); toast(tr('보기 링크를 껐습니다. 전에 보낸 링크는 더 열리지 않습니다')) })
+  const make = () => run(async () => {
+    let link: string
+    try { link = shortViewLink(await createViewLink(trip)) } catch (e) {
+      if (!(e instanceof NoViewServer) || !driveConfigured || !owner) throw e
+      link = viewLink(await startViewLink(trip.id))
+    }
+    toast(tr('보기 링크를 만들었습니다'))
+    await send(link)
+  })
+  const stop = () => run(async () => {
+    if (saved) await removeViewLink(trip.id)
+    if (drive && owner) await stopViewLink(trip.id)
+    toast(tr('보기 링크를 껐습니다. 전에 보낸 링크는 더 열리지 않습니다'))
+  })
   return (
     <section className="coedit">
-      <h3><Eye size={18} />{tr('로그인 없이 일정 보여 주기')}</h3>
-      {v ? (
-        <>
-          <p className="hint" style={{ marginTop: 0 }}>{tr('보기 링크가 켜져 있습니다. 링크가 있는 사람은 로그인 없이 일정·항공편·숙소를 보고, 고친 내용도 1분 안팎으로 반영됩니다. 지출·준비물·이메일·예약번호는 보이지 않습니다.')}</p>
-          <div className="row">
-            <button className="btn btn-primary" disabled={busy} onClick={() => send(viewLink(v.fileId))}><Send size={16} />{tr('보기 링크 보내기')}</button>
-            <button className="btn btn-ghost" disabled={busy} onClick={() => copy(viewLink(v.fileId), tr('보기 링크를 복사했습니다'))} aria-label={tr('보기 링크 복사')}><Copy size={16} /></button>
-            {owner && <button className="btn btn-quiet" disabled={busy} onClick={stop}>{tr('끄기')}</button>}
-          </div>
-        </>
-      ) : driveConfigured && owner ? (
-        <>
-          <p className="hint" style={{ marginTop: 0 }}>{tr('받는 사람은 로그인 없이 일정·항공편·숙소를 보고, 내가 고치면 1분 안팎으로 반영됩니다. 지출·준비물·이메일·예약번호는 보이지 않습니다. 처음 한 번 내 Google 계정 연결이 필요합니다.')}</p>
-          <button className="btn btn-primary btn-block" disabled={busy} onClick={make}><Eye size={18} />{tr('보기 링크 만들기')}</button>
-        </>
-      ) : null}
-      <button className="btn btn-quiet btn-block" style={{ marginTop: 6 }} onClick={() => send(snapshotViewLink(trip))}>
-        <Link2 size={16} />{v || (driveConfigured && owner) ? tr('Google 없이 지금 일정 그대로 보내기') : tr('지금 일정 그대로 보내기')}
-      </button>
+      <h3><Eye size={18} />{tr('로그인 없이 보여 주기')}</h3>
+      <p className="hint" style={{ marginTop: 0 }}>{url
+        ? tr('보기 링크가 켜져 있습니다. 링크가 있는 사람은 로그인 없이 일정·예산·준비물을 보고, 고친 내용은 1분 안팎으로 반영됩니다.')
+        : tr('짧은 링크 하나로 일정·예산·준비물을 보여 줍니다. 받는 사람은 앱 설치나 로그인 없이 보고, 고친 내용은 1분 안팎으로 반영됩니다.')}
+        {' '}{tr('동행 이메일·예약번호·기록은 보이지 않습니다.')}</p>
+      {url ? (
+        <div className="view-actions">
+          <button className="btn btn-primary" disabled={busy} onClick={() => send(url)}><Send size={16} />{tr('보기 링크 보내기')}</button>
+          <button className="btn btn-ghost" disabled={busy} onClick={() => copy(url, tr('보기 링크를 복사했습니다'))} aria-label={tr('보기 링크 복사')}><Copy size={16} /></button>
+          {(saved || owner) && <button className="btn btn-quiet" disabled={busy} onClick={stop}>{tr('끄기')}</button>}
+        </div>
+      ) : <button className="btn btn-primary btn-block" disabled={busy} onClick={make}><Eye size={18} />{tr('보기 링크 만들기')}</button>}
     </section>
   )
 }
-

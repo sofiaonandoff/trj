@@ -545,4 +545,13 @@ export const EN: Record<string, string> = {
   "보기 링크를 끄지 못했습니다": "Couldn't turn off the view link",
   "이 앱에는 Google API 키가 설정되어 있지 않습니다": "This app has no Google API key set",
   "일정을 받지 못했습니다. 잠시 뒤 다시 열어 보세요": "Couldn't load the plan. Try again in a moment",
+  "전체 예산 {0}": "Total budget {0}",
+  "적어 둔 준비물이 없습니다": "No checklist items yet",
+  "로그인 없이 보여 주기": "Share without sign-in",
+  "보기 링크가 켜져 있습니다. 링크가 있는 사람은 로그인 없이 일정·예산·준비물을 보고, 고친 내용은 1분 안팎으로 반영됩니다.": "The view link is on. Anyone with it sees the plan, budget and checklist without signing in, and edits show up within about a minute.",
+  "짧은 링크 하나로 일정·예산·준비물을 보여 줍니다. 받는 사람은 앱 설치나 로그인 없이 보고, 고친 내용은 1분 안팎으로 반영됩니다.": "One short link shows the plan, budget and checklist. People open it without installing or signing in, and edits show up within about a minute.",
+  "동행 이메일·예약번호·기록은 보이지 않습니다.": "Companion emails, booking numbers and the journal stay hidden.",
+  "보기 링크 서버가 아직 준비되지 않았습니다": "The view link server isn't set up yet",
+  "여행이 너무 커서 보기 링크에 담지 못했습니다": "This trip is too large for a view link",
+  "보기 링크를 만들지 못했습니다": "Couldn't create the view link",
 }

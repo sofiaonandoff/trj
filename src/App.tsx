@@ -1,5 +1,6 @@
 import { tr } from './i18n'
 import ViewPage from './components/ViewPage'
+import { initViewSync } from './lib/viewLink'
 import { useEffect } from 'react'
 import { JoinPage } from './components/DriveUI'
 import Home from './components/Home'
@@ -14,7 +15,7 @@ export default function App() {
   const route = useRoute()
   const add = useStore((s) => s.add)
 
-  useEffect(() => { initDrive() }, [])
+  useEffect(() => { initDrive(); initViewSync() }, [])
 
   // 복사본 링크(#/import/…)로 들어오면 여행을 이 기기에 담고 바로 연다
   useEffect(() => {
@@ -29,6 +30,7 @@ export default function App() {
   else if (route.startsWith('/trip/')) page = <TripPage key={route} id={route.slice('/trip/'.length)} />
   else if (route.startsWith('/join/')) page = <JoinPage fileId={route.slice('/join/'.length)} />
   else if (route.startsWith('/import/')) page = <div className="shell" />
+  else if (route.startsWith('/v/')) page = <ViewPage key={route} source={`k/${route.slice('/v/'.length)}`} />
   else if (route.startsWith('/view/')) page = <ViewPage key={route} source={route.slice('/view/'.length)} />
 
   return <>{page}<Toast /></>
