@@ -118,6 +118,17 @@ export async function readTripPhoto(file: File, trip: Trip, current: string, onS
       if (hit) { where = { lat: hit.lat, lng: hit.lng }; break }
     }
   }
+  // 숙소인데 주소가 없으면: 숙소 이름(도시로 지은 이름이 아닐 때) → 화면의 지명(도시) 순으로 지도에서 찾는다
+  if (r.category === 'stay' && !where && !gps) {
+    const around = legOf(trip, r.stay?.checkIn ?? date)
+    const city = r.stay?.city
+    const own = name && !(city && name === tr('{0} 숙소', city)) ? name : undefined
+    for (const q of [own && city ? `${own}, ${city}` : own, city].filter(Boolean) as string[]) {
+      const hits = (await searchPlaces(q, around).catch(() => [])).filter((x) => !x.airport)
+      const hit = q === city || city ? hits.find((x) => km(around, x) <= 3000) : hits.find((x) => km(around, x) <= 80)
+      if (hit) { where = { lat: hit.lat, lng: hit.lng }; break }
+    }
+  }
   if (!r.costOnly && !where) {
     if (gps) {
       where = gps
@@ -139,7 +150,8 @@ export async function readTripPhoto(file: File, trip: Trip, current: string, onS
       date: checkIn, dateFrom: 'image', expense: expense && { ...expense, category: 'stay', date: checkIn },
       stay: {
         id: uid(), name, ...loc, checkIn, checkOut, inTime: r.stay.inTime, outTime: r.stay.outTime, code: r.code,
-        address: stayAddress, note: r.stay.host ? tr('호스트 {0}', r.stay.host) : undefined,
+        address: stayAddress,
+        note: [r.stay.room && tr('객실 {0}', r.stay.room), r.stay.host && tr('호스트 {0}', r.stay.host)].filter(Boolean).join(' · ') || undefined,
       },
     })
     return out

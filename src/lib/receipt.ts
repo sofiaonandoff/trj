@@ -1,7 +1,8 @@
+import { tr } from '../i18n'
 import type { Category, ExpenseCategory, Flight } from '../types'
 import { AIRLINES, AIRPORTS } from '../data/airports'
 import { isComplete, parseFlightText } from './flight'
-import { addDays } from './util'
+import { addDays, dateRange } from './util'
 
 /**
  * 사진에서 읽은 글자(OCR)로 영수증·예약 화면·탑승권을 해석한다. AI 없이 기기 안에서만 동작한다.
@@ -24,7 +25,7 @@ export interface Reading {
   costOnly: boolean
   flights: Flight[]
   /** 숙소 예약 화면이면 체크인·체크아웃 */
-  stay?: { checkIn?: string; checkOut?: string; inTime?: string; outTime?: string; address?: string; city?: string; host?: string }
+  stay?: { checkIn?: string; checkOut?: string; inTime?: string; outTime?: string; address?: string; city?: string; host?: string; room?: string }
 }
 
 const IN = /체크\s*인|check[\s-]*in|入住|チェックイン|เช็คอิน/i
@@ -71,7 +72,21 @@ export function findStayDates(text: string, days: string[]): Reading['stay'] {
     }
   }
 
-  // 2) 항목마다 줄이 있는 모양: "체크인 2026.12.02 15:00" 또는 "체크인" 다음 줄에 날짜
+  // 2) 한 줄에 날짜가 두 개: "Sun, Dec 13 → Mon, Dec 14" (아고다 등). 앞이 체크인, 뒤가 체크아웃
+  //    시각은 그 아래·위 줄에서: 왼쪽 칸 시각은 체크인, 'Check-out' 옆 시각은 체크아웃
+  if (both < 0) {
+    for (let i = 0; i < lines.length; i++) {
+      const ds = [...new Set(findDates(lines[i], year))].sort()
+      if (ds.length !== 2 || ds[1] <= ds[0] || dateRange(ds[0], ds[1]).length > 32) continue
+      const near = [lines[i + 1] ?? '', lines[i - 1] ?? ''].find((l) => /\d\s*[:.]\s*\d\d/.test(l) && !findDates(l, year).length) ?? ''
+      const cs = columns(near)
+      const inCol = cs.find((c) => /\d\s*[:.]\s*\d\d/.test(c) && !OUT.test(c))
+      const outCol = cs.find((c) => /\d\s*[:.]\s*\d\d/.test(c) && OUT.test(c)) ?? (cs.length >= 2 && cs[cs.length - 1] !== inCol && /\d\s*[:.]\s*\d\d/.test(cs[cs.length - 1]) ? cs[cs.length - 1] : undefined)
+      return { checkIn: ds[0], checkOut: ds[1], inTime: inCol ? stayTime(inCol, true) : undefined, outTime: outCol ? stayTime(outCol, false) : undefined }
+    }
+  }
+
+  // 3) 항목마다 줄이 있는 모양: "체크인 2026.12.02 15:00" 또는 "체크인" 다음 줄에 날짜
   const pick = (re: RegExp, checkin: boolean) => {
     const i = lines.findIndex((l) => re.test(l) && !(IN.test(l) && OUT.test(l)) && findDates(l, year).length)
     const at = i >= 0 ? i : lines.findIndex((l, k) => re.test(l) && !(IN.test(l) && OUT.test(l)) && k + 1 < lines.length && findDates(lines[k + 1], year).length)
@@ -97,8 +112,8 @@ export const stayLabelLine = (lines: OcrLine[]) => lines.find((l) => IN.test(l.t
  * - 도시: 'Tauranga의 숙소'의 Tauranga (주소로 위치를 찾을 때 함께 쓴다)
  * - 주소: '찾아가는 방법'·'주소'·'Address' 다음 줄
  */
-export function findStayInfo(lines: string[]): { name?: string; city?: string; address?: string; host?: string } {
-  const out: { name?: string; city?: string; address?: string; host?: string } = {}
+export function findStayInfo(lines: string[]): { name?: string; city?: string; address?: string; host?: string; room?: string } {
+  const out: { name?: string; city?: string; address?: string; host?: string; room?: string } = {}
   const clean = (s: string) => s.replace(/^[^\p{L}\p{N}]+/u, '').replace(/\s+/g, ' ').trim()
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i].trim()
@@ -113,6 +128,12 @@ export function findStayInfo(lines: string[]): { name?: string; city?: string; a
       const cand = own.length > 4 ? own : next
       if (cand && /\d|\p{L}{3,}/u.test(cand) && !IN.test(cand) && cand.length <= 80) out.address = cand
     }
+    // 도시: 'More Hotels in Sydney', 'Hotels in Bangkok', '시드니의 다른 숙소'
+    const c = l.match(/\b(?:hotels?|stays?|properties|homes?)\s+in\s+([A-Z][\p{L} .'-]{1,30})$/iu) ?? l.match(/([\p{L}]{2,20})(?:의)?\s*(?:다른\s*)?(?:숙소|호텔)\s*더\s*보기/u)
+    if (c && !out.city) out.city = c[1].trim()
+    // 객실: 'Studio Superior', '디럭스 더블룸'
+    const r = l.match(/(?:^|\s)((?:(?:studio|superior|deluxe|standard|premier|executive|family|junior|grand)\s+)*(?:studio|superior|deluxe|standard|suite|double|twin|king|queen|single|room|dorm)(?:\s+(?:room|suite|double|twin|king|queen|view|city|ocean|river|with\s+[\w ]+))*|[가-힣]*(?:디럭스|스탠다드|슈페리어|스위트|트윈|더블|싱글|패밀리)[가-힣 ]*룸?)\s*$/i)
+    if (r && !out.room && r[1].length >= 5 && !/^room$/i.test(r[1])) out.room = r[1].trim()
     // '숙소' 제목 다음 줄: 숙소 소개 제목 (한두 글자로 끊겨 읽힌 줄은 이어 붙인다)
     if (/^\W{0,4}[A-Za-z]{0,3}\s*숙소\s*$/.test(l) && !/의|이용/.test(l)) {
       let n = clean(lines[i + 1] ?? '')
@@ -147,7 +168,7 @@ export function findDates(text: string, year: number): string[] {
   for (const m of t.matchAll(/(\d{1,2})\s*월\s*(\d{1,2})\s*일/g)) push(year, +m[1], +m[2])
   const month = (w: string) => MONTHS[w.toLowerCase().slice(0, 4)] ?? MONTHS[w.toLowerCase().slice(0, 3)]
   for (const m of t.matchAll(/\b(\d{1,2})(?:st|nd|rd|th)?\s*([A-Za-z]{3,9})\.?,?\s*(\d{4})?/g)) { const mo = month(m[2]); if (mo) push(m[3] ? +m[3] : year, mo, +m[1]) }
-  for (const m of t.matchAll(/\b([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b,?\s*(\d{4})?/g)) { const mo = month(m[1]); if (mo) push(m[3] ? +m[3] : year, mo, +m[2]) }
+  for (const m of t.matchAll(/\b([A-Za-z]{3,9})\.?\s*(\d{1,2})(?:st|nd|rd|th)?\b,?\s*(\d{4})?/g)) { const mo = month(m[1]); if (mo) push(m[3] ? +m[3] : year, mo, +m[2]) }
   for (const m of t.matchAll(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/g)) push(+m[1], +m[2], +m[3])
   // 항공권 표기: 02DEC26, 04DEC
   for (const m of t.matchAll(/\b(\d{2})(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(\d{2})?\b/gi)) push(m[3] ? 2000 + +m[3] : year, MONTHS[m[2].toLowerCase()], +m[1])
@@ -261,7 +282,7 @@ export function findTotal(lines: string[]): number | undefined {
 }
 
 const KINDS: { re: RegExp; cat: Category; exp: ExpenseCategory; costOnly?: boolean }[] = [
-  { re: /hotel|hostel|resort|check[\s-]?in|호텔|숙박|숙소|체크\s*인|호스트|에어비앤비|리조트|게스트하우스|ホテル|旅館|โรงแรม|airbnb|agoda|booking\.com|게스트\s*\d+\s*명|\d+\s*guests?\b|저택|호실|별채|펜션|민박|빌라|콘도|아파트|단독\s*주택|공동\s*주택|집\s*전체|개인실|게스트용|타운하우스|캐빈|오두막|entire\s+(home|place|rental)|guest\s*suite|guesthouse|private\s+room|room\s+in|apartment|condo|villa|cottage|cabin|bungalow|townhouse|loft/i, cat: 'stay', exp: 'stay' },
+  { re: /hotel|hostel|resort|check[\s-]?in|check[\s-]?out|호텔|숙박|숙소|체크\s*인|호스트|에어비앤비|리조트|게스트하우스|ホテル|旅館|โรงแรม|airbnb|agoda|booking\.com|게스트\s*\d+\s*명|\d+\s*guests?\b|저택|호실|별채|펜션|민박|빌라|콘도|아파트|단독\s*주택|공동\s*주택|집\s*전체|개인실|게스트용|타운하우스|캐빈|오두막|entire\s+(home|place|rental)|guest\s*suite|guesthouse|private\s+room|room\s+in|apartment|condo|villa|cottage|cabin|bungalow|townhouse|loft/i, cat: 'stay', exp: 'stay' },
   { re: /taxi|grab|bolt|uber|bts|mrt|metro|subway|railway|train|bus|ferry|택시|지하철|버스|기차|열차|교통|suica|pasmo|タクシー|電車|แท็กซี่|รถไฟ/i, cat: 'sight', exp: 'move', costOnly: true },
   { re: /cafe|café|coffee|starbucks|카페|커피|喫茶|カフェ|กาแฟ|bakery|베이커리/i, cat: 'cafe', exp: 'food' },
   { re: /restaurant|bistro|kitchen|ramen|sushi|bbq|bar\b|pub|식당|레스토랑|음식|라멘|스시|食堂|レストラン|ร้านอาหาร|food|noodle|menu|국수|교자|김밥|찌개|국밥|치킨|고기|ラーメン|うどん|そば|寿司|居酒屋|ก๋วยเตี๋ยว|phở/i, cat: 'food', exp: 'food' },
@@ -353,7 +374,7 @@ export function flightFromTable(text: string, days: string[]): Flight | null {
   return flight
 }
 
-const CHROME = /^\s*\d{1,2}:\d{2}(?!\s*[~\-–—]\s*\d)(\s|$)|\b[\w-]+\.(com|net|org|co|kr|jp|io|travel|app)(\.[a-z]{2})?\b|ask\s*gemini|new\s*tab|all\s*tabs|^\s*[<←]\s|결제하기|다음\s*단계|^[\s+©@]*$/i
+const CHROME = /^\W*(?:safari|chrome|instagram|kakaotalk|카카오톡)\b|^\s*\d{1,2}:\d{2}\d?\s*(?:[\\«»/|]|\S{0,2}\s+(?:all|ail|al|ul)\b)|\b[\w-]+\.(com|net|org|co|kr|jp|io|travel|app)(\.[a-z]{2})?\b|ask\s*gemini|new\s*tab|all\s*tabs|^\s*[<←]\s|결제하기|다음\s*단계|^[\s+©@]*$/i
 
 /** 흔한 체인점 이름은 OCR이 조금 틀려도 바로잡는다 (T-ELEVEN → 7-Eleven) */
 const BRANDS = ['7-Eleven', 'FamilyMart', 'Lawson', 'Starbucks', 'Starbucks Reserve', 'McDonald\'s', 'Burger King', 'KFC', 'Subway', 'Don Quijote', 'Uniqlo', 'Muji', 'Tops', 'Big C', 'Lotus\'s', 'Boots', 'Watsons', 'MaxValu', 'Daiso', 'Olive Young', 'GS25', 'CU', 'emart24', 'Grab', 'Bolt', 'Uber']
@@ -382,11 +403,20 @@ export function stayOf(lines: string[], days: string[]): Reading['stay'] {
   return { ...d, address: info.address, city: info.city, host: info.host }
 }
 
-export function readText(lines: OcrLine[], days: string[], tripCurrency: string): Reading {
+const PROMO = /book another|more hotels|flight to\s|you might also|recommended for you|similar (?:hotels|properties)|함께 (?:예약|보면)|다른 숙소|추천 (?:숙소|항공)|항공권 할인|최대\s*\d+%\s*할인|up to \d+% off/i
+
+export function readText(all: OcrLine[], days: string[], tripCurrency: string): Reading {
+  // 예약 확인 화면 아래의 광고·추천(다른 객실·숙소 예약, 항공권 할인)은 내 예약이 아니다: 거기부터 잘라 낸다.
+  // 다만 'More Hotels in Sydney'처럼 도시 이름은 거기서도 얻는다
+  const promoAt = all.findIndex((l) => PROMO.test(l.text))
+  const lines = promoAt > 2 ? all.slice(0, promoAt) : all
+  const promo = promoAt > 2 ? all.slice(promoAt).map((l) => l.text) : []
   const text = lines.map((l) => l.text).join('\n')
   const year = Number((days[0] ?? '').slice(0, 4)) || new Date().getFullYear()
-  let flights: Flight[] = parseFlightText(text, year).filter(isComplete)
-  if (!flights.length) { const t = flightFromTable(lines.filter((l) => !CHROME.test(l.text)).map((l) => l.text).join('\n'), days); if (t) flights = [t] }
+  // 숙소 확인 화면(체크아웃이 있는)에서는 항공편을 만들지 않는다
+  const hotelPage = /check[\s-]*out|체크\s*아웃|チェックアウト/i.test(text) && !/편명|flight\s*no|boarding|탑승/i.test(text)
+  let flights: Flight[] = hotelPage ? [] : parseFlightText(text, year).filter(isComplete)
+  if (!flights.length && !hotelPage) { const t = flightFromTable(lines.filter((l) => !CHROME.test(l.text)).map((l) => l.text).join('\n'), days); if (t) flights = [t] }
   flights = flights.map((f, i) => ({ ...f, id: `ocr${Date.now()}${i}` }))
   const kind = flights.length ? { cat: 'sight' as Category, exp: 'move' as ExpenseCategory, costOnly: true } : KINDS.find((k) => k.re.test(text))
   // 휴대폰 상태 표시줄(시계·배터리)과 브라우저 주소창·메뉴 줄은 내용이 아니다.
@@ -401,8 +431,13 @@ export function readText(lines: OcrLine[], days: string[], tripCurrency: string)
   const kana = /[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(text)
   const guessCur = hangul > 15 && !/[฿$€¥]|THB|USD|JPY|EUR|บาท/.test(text) ? 'KRW' : kana && !/[฿$€₩]|THB|USD|KRW|EUR/.test(text) ? 'JPY' : tripCurrency
   const info = kind?.cat === 'stay' ? findStayInfo(body.map((l) => l.text)) : {}
+  if (kind?.cat === 'stay') { const p = findStayInfo(promo); info.city ??= p.city; info.room ??= p.room }
+  // 숙소 이름: 화면에 숙소 이름이 없는 예약 확인 화면(아고다 등)이면 머리말 대신 'Sydney 숙소'처럼 도시로
+  const hotelLine = body.map((l) => l.text).find((t) => /hotel|resort|\binn\b|suites?\b|hostel|apartments?\b|호텔|리조트|ホテル/i.test(t) && !/hotels?\s+in\b|book another|호텔\s*더/i.test(t) && t.length <= 48)
+  const stayName = kind?.cat === 'stay' ? info.name ?? hotelLine?.replace(/^[^\p{L}\p{N}]+/u, '').trim() ?? (info.city ? tr('{0} 숙소', info.city) : undefined) : undefined
+  const stay = kind?.cat === 'stay' ? stayOf(body.map((l) => l.text), days) : undefined
   return {
-    name: info.name ?? (name && fixBrand(name)),
+    name: stayName ?? (name && fixBrand(name)),
     code: findCode(text),
     date: pickTripDate(text, days),
     time: findTime(lines.filter((l) => /시간|시각|time|체크\s*인|check[\s-]*in|입장|時/i.test(l.text)).map((l) => l.text).join('\n')) ?? findTime(body.map((l) => l.text).join('\n')),
@@ -412,6 +447,6 @@ export function readText(lines: OcrLine[], days: string[], tripCurrency: string)
     expenseCategory: kind?.exp ?? (amount ? 'etc' : 'play'),
     costOnly: Boolean(kind?.costOnly),
     flights,
-    stay: kind?.cat === 'stay' ? stayOf(body.map((l) => l.text), days) : undefined,
+    stay: stay || info.city ? { ...stay, city: stay?.city ?? info.city, room: info.room } : undefined,
   }
 }

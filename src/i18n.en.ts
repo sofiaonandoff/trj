@@ -429,4 +429,6 @@ export const EN: Record<string, string> = {
   "지도에서 위치를 찾지 못해 도시 가운데에 두었습니다. 주소를 더 자세히 넣어 보세요": "Couldn't find it on the map, so it's placed in the city center. Try a more detailed address",
   "체크인·체크아웃을 다시 읽는 중": "Re-reading check-in and check-out",
   "호스트 {0}": "Host {0}",
+  "{0} 숙소": "Stay in {0}",
+  "객실 {0}": "Room: {0}",
 }
