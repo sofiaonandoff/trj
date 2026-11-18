@@ -1,4 +1,4 @@
-import { baseOf, customRate, krwToBase, money, rateInBase, resetRate, setBase, setRateInBase, toBase } from '../src/data/currencies'
+import { baseOf, budgetKrw, customRate, krwToBase, money, rateInBase, resetRate, setBudget, setRateInBase, setViewerBase, toBase } from '../src/data/currencies'
 import type { Trip } from '../src/types'
 
 let fails = 0
@@ -6,11 +6,14 @@ const check = (label: string, ok: boolean, got?: unknown) => { if (!ok) fails++;
 const near = (a: number, b: number) => Math.abs(a - b) < 1e-6 * Math.max(1, Math.abs(b))
 
 const t = { currency: 'NZD', rate: 820, budget: 1_640_000 } as Trip
-check('기준 화폐가 없으면 원화', baseOf(t) === 'KRW' && near(toBase(t, 10, 'NZD'), 8200))
+setViewerBase('KRW')
+check('원화로 보는 사람', baseOf(t) === 'KRW' && near(toBase(t, 10, 'NZD'), 8200))
 check('원화 기준: 1 NZD = 820원', JSON.stringify(rateInBase(t, 'NZD')) === JSON.stringify({ per: 1, value: 820 }))
 
-setBase(t, 'USD') // 1 USD = 1400원
-check('기준 화폐를 바꾸면 예산도 그 화폐로 (1,640,000원 → 1,171.43 USD)', t.base === 'USD' && near(t.budget, 1171.43), t.budget)
+setViewerBase('USD') // 같은 여행을 달러로 보는 동행 (1 USD = 1400원)
+check('예산은 원화로 적혀 있어도 달러로 보인다 (1,640,000원 = 1,171.43 USD)', near(krwToBase(t, budgetKrw(t)), 1640000 / 1400) && t.budget === 1_640_000, t)
+setBudget(t, 1200)
+check('달러로 예산을 고치면 예산 화폐도 달러', t.base === 'USD' && t.budget === 1200 && near(budgetKrw(t), 1200 * 1400))
 check('NZD를 USD로: 10 NZD = 5.857 USD', near(toBase(t, 10, 'NZD'), 8200 / 1400))
 const k = rateInBase(t, 'KRW')
 check('원화는 10,000원 단위로 보여 준다 (10,000 KRW = 7.14 USD)', k.per === 10000 && near(k.value, 10000 / 1400), k)
@@ -26,5 +29,7 @@ resetRate(t, 'EUR')
 check('기본값으로 되돌리기', !customRate(t, 'EUR') && t.rates!.EUR === undefined)
 check('금액 표시', ['12,300원', '₩12,300'].includes(money(12300, 'KRW')) && money(12.3, 'USD') === '12.30 USD' && money(1234.5, 'NZD') === '1,235 NZD' && money(1500, 'JPY') === '1,500 JPY', [money(12300, 'KRW'), money(12.3, 'USD'), money(1234.5, 'NZD')])
 
+setViewerBase('KRW')
+check('원화로 보는 사람에게는 그 예산이 원화로', near(krwToBase(t, budgetKrw(t)), 1200 * 10000 / 7), krwToBase(t, budgetKrw(t)))
 console.log(fails ? `\n${fails}개 실패` : '\n모두 통과')
 process.exit(fails ? 1 : 0)

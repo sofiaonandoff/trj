@@ -1,4 +1,5 @@
 import { tr } from '../i18n'
+import { tx, useTranslations } from '../lib/translate'
 import { Download, Eye, ListChecks, MapPin, RefreshCw, Route, Wallet } from 'lucide-react'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { CATEGORY } from '../data/destinations'
@@ -33,6 +34,7 @@ export default function ViewPage({ source }: { source: string }) {
   const [idx, setIdx] = useState(0)
   const [tab, setTab] = useState<ViewTab>('plan')
   const add = useStore((s) => s.add)
+  useTranslations()
 
   const load = useCallback(async () => {
     if (snapshot) return
@@ -79,7 +81,7 @@ export default function ViewPage({ source }: { source: string }) {
     <Frame head={<>
         <div className="meta" style={{ paddingTop: 4 }}>
           <div>
-            <h1 className="view-title">{trip.title}</h1>
+            <h1 className="view-title">{tx(trip.title)}</h1>
             <p>{fmtRange(trip.start, trip.end)}</p>
           </div>
           <Avatars members={trip.members} />
@@ -121,6 +123,7 @@ function Frame({ head, children }: { head?: React.ReactNode; children?: React.Re
 }
 
 function Day({ trip, idx, setIdx }: { trip: Trip; idx: number; setIdx: (i: number) => void }) {
+  useTranslations()
   const di = Math.min(idx, trip.days.length - 1)
   const day = trip.days[di]
   const line = useMemo(() => dayLine(trip, day.date), [trip, day.date])
@@ -174,9 +177,9 @@ function Day({ trip, idx, setIdx }: { trip: Trip; idx: number; setIdx: (i: numbe
                     <div className="tl-body">
                       <div className="card">
                         <button className="card-main" onClick={() => maps(p.address || p.name, p.address ? undefined : p)} aria-label={tr('{0} 지도에서 보기', p.name)}>
-                          <h3>{p.name}</h3>
+                          <h3>{tx(p.name)}</h3>
                           <div className="sub"><span className="cat" style={{ color: c.color }}>{c.label}</span>{p.duration ? <span>{fmtDur(p.duration)}</span> : null}<span className="map-hint"><MapPin size={12} />{tr('지도')}</span></div>
-                          {p.note && <div className="note">{p.note}</div>}
+                          {p.note && <div className="note">{tx(p.note)}</div>}
                         </button>
                       </div>
                       <Hop from={p} to={next} />

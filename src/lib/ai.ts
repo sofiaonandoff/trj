@@ -25,10 +25,10 @@ export function aiMessage(e: unknown): string {
   }
 }
 
-async function call<T>(body: { mode: string; [k: string]: unknown }): Promise<T> {
+export async function call<T>(body: { mode: string; [k: string]: unknown }): Promise<T> {
   const ac = new AbortController()
   // 서버가 정한 시간 예산보다 조금 길게 기다린다
-  const timer = setTimeout(() => ac.abort(), body.mode === 'names' ? 18_000 : body.mode === 'trip' ? 95_000 : 40_000)
+  const timer = setTimeout(() => ac.abort(), body.mode === 'texts' ? 28_000 : body.mode === 'names' ? 18_000 : body.mode === 'trip' ? 95_000 : 40_000)
   try {
     const res = await fetch('/api/plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, lang }), signal: ac.signal })
     // 서버 함수가 없는 곳(정적 호스팅)에서는 JSON이 아닌 답이 온다

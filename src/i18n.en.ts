@@ -630,4 +630,8 @@ export const EN: Record<string, string> = {
   "저장할 때 이 주소로 지도 위치를 다시 찾습니다.": "When you save, the map location is found again from this address.",
   "위 검색에서 고르거나, 주소를 고치면 지도 위치가 바뀝니다.": "Pick from the search above, or edit the address, to change the map location.",
   "스파·휴식": "Spa & relax",
+  "내 기준 화폐": "My base currency",
+  "기준 화폐는 이 기기에서 나만 보는 설정입니다. 함께 쓰는 동행은 각자 원하는 화폐로 봅니다.": "The base currency is just for you on this device. Companions sharing the trip see their own.",
+  "함께 쓰는 사람이 다른 언어로 적은 내용을 화면 언어로 옮겨 보기": "Translate what others wrote in another language",
+  "장소·숙소 이름, 메모, 지출, 준비물을 이 기기에서만 옮겨 보여 줍니다. 원래 글은 바뀌지 않고, 고칠 때는 원래 글이 나옵니다. 옮기는 데 AI(Gemini)를 씁니다.": "Place and stay names, notes, expenses and checklist items are translated on this device only. The original text doesn't change, and you edit the original. Translation uses AI (Gemini).",
 }

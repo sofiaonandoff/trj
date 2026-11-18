@@ -1,8 +1,9 @@
 import { tr } from '../i18n'
+import { tx, useTranslations } from '../lib/translate'
 import { ArrowRight, Plus, Trash2 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import { md, today, uid, won } from '../lib/util'
-import { CURRENCIES, baseOf, customRate, krwToBase, money, rateInBase, rateOf, resetRate, setBase, setRateInBase, toWon as wonOf, unit } from '../data/currencies'
+import { CURRENCIES, baseOf, customRate, krwToBase, money, rateInBase, rateOf, resetRate, setBudget, setRateInBase, setViewerBase, onBaseChange, budgetCurrency, budgetKrw as budgetInKrw, toWon as wonOf, unit } from '../data/currencies'
 import CurrencySelect from './CurrencySelect'
 import { RotateCcw } from 'lucide-react'
 import { useStore } from '../store'
@@ -41,6 +42,7 @@ function settle(trip: Trip, toWon: (e: Expense) => number) {
 
 /** readOnly: 로그인 없이 보는 링크에서 쓴다 (고치는 칸과 버튼을 숨긴다) */
 export default function BudgetTab({ trip, readOnly = false }: { trip: Trip; readOnly?: boolean }) {
+  useTranslations()
   const mutate = useStore((s) => s.mutate)
   const [edit, setEdit] = useState<Expense | 'new'>()
   const toWon = (e: Expense) => wonOf(trip, e.amount, e.currency)
@@ -48,10 +50,13 @@ export default function BudgetTab({ trip, readOnly = false }: { trip: Trip; read
   const byCat = CATS.map((c) => ({ c, v: trip.expenses.filter((e) => e.category === c).reduce((s, e) => s + toWon(e), 0) })).filter((x) => x.v > 0)
   const transfers = settle(trip, toWon)
   const name = (id: string) => trip.members.find((m) => m.id === id)
+  useSyncExternalStore(onBaseChange, baseOf)
   const base = baseOf(trip)
   /** 원화로 계산한 금액을 기준 화폐로 보여 준다 */
   const M = (krw: number) => money(krwToBase(trip, krw), base)
-  const budgetKrw = trip.budget * rateOf(trip, base)
+  const budgetKrw = budgetInKrw(trip)
+  // 예산 칸: 예산이 다른 화폐로 적혀 있으면 내 기준 화폐로 바꿔 보여 준다
+  const budgetShown = !trip.budget ? 0 : budgetCurrency(trip) === base ? trip.budget : Math.round(krwToBase(trip, budgetKrw) * 100) / 100
   const over = trip.budget > 0 && total > budgetKrw
   // 환율을 보여 줄 화폐: 여행지 화폐와 지출에 쓴 화폐 (기준 화폐는 빼고)
   const used = [...new Set([trip.currency, ...trip.expenses.map((e) => e.currency)])].filter((c) => c !== base)
@@ -80,12 +85,13 @@ export default function BudgetTab({ trip, readOnly = false }: { trip: Trip; read
         </div>
         <div className="legend">{byCat.map(({ c, v }) => <span key={c}><i className="dot" style={{ background: CAT[c].color }} />{CAT[c].label} {M(v)}</span>)}</div>
         {readOnly ? (
-          trip.budget > 0 && <p className="hint">{tr('전체 예산 {0}', money(trip.budget, base))}</p>
+          trip.budget > 0 && <p className="hint">{tr('전체 예산 {0}', money(budgetShown, base))}</p>
         ) : <div className="row" style={{ marginTop: 16 }}>
           <label className="field"><span>{tr('전체 예산 ({0})', unit(base))}</span>
-            <input type="number" inputMode="decimal" min={0} step="any" value={trip.budget || ''} placeholder={tr('정하지 않음')} onChange={(e) => mutate(trip.id, (t) => { t.budget = Number(e.target.value) || 0 })} /></label>
-          <CurrencySelect trip={trip} value={base} label={tr('기준 화폐')} onChange={(c) => mutate(trip.id, (t) => setBase(t, c))} />
+            <input type="number" inputMode="decimal" min={0} step="any" value={budgetShown || ''} placeholder={tr('정하지 않음')} onChange={(e) => mutate(trip.id, (t) => setBudget(t, Number(e.target.value) || 0))} /></label>
+          <CurrencySelect trip={trip} value={base} label={tr('내 기준 화폐')} onChange={setViewerBase} />
         </div>}
+        {!readOnly && <p className="hint">{tr('기준 화폐는 이 기기에서 나만 보는 설정입니다. 함께 쓰는 동행은 각자 원하는 화폐로 봅니다.')}</p>}
         {trip.budget > 0 && <p className="hint">{over ? tr('예산을 {0} 넘었습니다', M(total - budgetKrw)) : tr('예산이 {0} 남았습니다', M(budgetKrw - total))}</p>}
       </section>
 
@@ -154,7 +160,7 @@ export default function BudgetTab({ trip, readOnly = false }: { trip: Trip; read
             {[...trip.expenses].sort((a, b) => b.date.localeCompare(a.date)).map((e) => (
               <button key={e.id} onClick={() => !readOnly && setEdit(e)} disabled={readOnly} className={readOnly ? 'static' : undefined}>
                 <i className="dot" style={{ background: CAT[e.category].color }} />
-                <span className="grow"><b>{e.title}</b><small>{tr('{0} · {1} 결제 · {2}명', md(e.date), name(e.payer)?.name ?? '?', e.split.length)}</small></span>
+                <span className="grow"><b>{tx(e.title)}</b><small>{tr('{0} · {1} 결제 · {2}명', md(e.date), name(e.payer)?.name ?? '?', e.split.length)}</small></span>
                 <span style={{ textAlign: 'right' }}>
                   <b className="num" style={{ fontSize: 17 }}>{e.amount.toLocaleString('ko-KR')} {unit(e.currency)}</b>
                   {e.currency !== base && <small>{M(toWon(e))}</small>}

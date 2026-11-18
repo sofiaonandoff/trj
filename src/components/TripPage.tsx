@@ -1,4 +1,5 @@
 import { tr } from '../i18n'
+import { tx, useTranslations } from '../lib/translate'
 import { motion } from 'framer-motion'
 import { ArrowLeft, BookOpen, Copy, Download, Eye, Link2, ListChecks, MoreHorizontal, Route, Send, Share2, Smartphone, UserPlus, Wallet } from 'lucide-react'
 import { useEffect, useState } from 'react'
@@ -34,6 +35,8 @@ export default function TripPage({ id }: { id: string }) {
   const [sharing, setSharing] = useState(false)
   const [managing, setManaging] = useState(false)
   const [people, setPeople] = useState(false)
+  const [titleFocus, setTitleFocus] = useState(false)
+  useTranslations()
   const [invites, setInvites] = useState<Invitee[]>()
   // 새 여행을 만들며 편집 권한을 준 동행이 있으면, 동행 관리를 열어 초대장을 보내게 한다
   useEffect(() => {
@@ -60,7 +63,8 @@ export default function TripPage({ id }: { id: string }) {
       <header className="trip-head">
         <div className="topbar">
           <button className="icon-btn" aria-label={tr('내 여행으로')} onClick={() => go('/')}><ArrowLeft size={22} /></button>
-          <input className="title-input" aria-label={tr('여행 이름')} value={trip.title} onChange={(e) => mutate(trip.id, (t) => { t.title = e.target.value })} />
+          {/* 고치는 동안에는 원래 이름, 아닐 때는 화면 언어로 옮긴 이름 */}
+          <input className="title-input" aria-label={tr('여행 이름')} value={titleFocus ? trip.title : tx(trip.title)} onFocus={() => setTitleFocus(true)} onBlur={() => setTitleFocus(false)} onChange={(e) => mutate(trip.id, (t) => { t.title = e.target.value })} />
           <button className="icon-btn" aria-label={tr('공유와 내보내기')} onClick={() => setSharing(true)}><Share2 size={20} /></button>
           <button className="icon-btn" aria-label={tr('여행 관리')} onClick={() => setManaging(true)}><MoreHorizontal size={22} /></button>
         </div>

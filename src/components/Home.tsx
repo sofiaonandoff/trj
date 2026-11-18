@@ -1,4 +1,5 @@
 import { tr } from '../i18n'
+import { tx, useTranslations } from '../lib/translate'
 import { FolderDown, MoreHorizontal, Plus } from 'lucide-react'
 import { useState } from 'react'
 import { diffDays, fmtRange, haptic, today } from '../lib/util'
@@ -19,6 +20,7 @@ function when(t: Trip) {
 
 export default function Home() {
   const trips = useStore((s) => s.trips)
+  useTranslations()
   const add = useStore((s) => s.add)
   const [importing, setImporting] = useState(false)
   /** 관리(기간·삭제) 시트를 연 여행 */
@@ -93,7 +95,7 @@ function Row({ t, onManage }: { t: Trip; onManage: () => void }) {
       <button className="trip-row" onClick={() => go(`/trip/${t.id}`)}>
         <span className="thumb"><RouteArt trip={t} dots={false} /></span>
         <span>
-          <h3>{t.title}</h3>
+          <h3>{tx(t.title)}</h3>
           <p>{fmtRange(t.start, t.end)}</p>
         </span>
         <span className="when">{when(t).big}</span>

@@ -37,6 +37,7 @@ const TRIP_SCHEMA = {
   required: ['days'],
 }
 const MORE_SCHEMA = { type: 'object', properties: { items: { type: 'array', items: PLACE } }, required: ['items'] }
+const TEXTS_SCHEMA = { type: 'object', properties: { texts: { type: 'array', items: { type: 'string' } } }, required: ['texts'] }
 const NAMES_SCHEMA = { type: 'object', properties: { names: { type: 'array', items: { type: 'string' } } }, required: ['names'] }
 const str = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '')
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
@@ -58,6 +59,22 @@ function common(lang: string) {
 type Built = { prompt: string; schema: object }
 function buildPrompt(b: Record<string, unknown>): Built | { error: string } {
   const lang = b.lang === 'en' ? 'en' : 'ko'
+  // 함께 쓰는 여행의 글(장소 이름·메모·지출 이름·준비물)을 보는 사람의 화면 언어로 옮긴다
+  if (b.mode === 'texts') {
+    const texts = Array.isArray(b.texts) ? b.texts.map((x) => str(x, 300)).filter(Boolean).slice(0, 40) : []
+    if (!texts.length) return { error: 'bad_request' }
+    const language = lang === 'en' ? 'English' : 'Korean'
+    return {
+      schema: TEXTS_SCHEMA,
+      prompt: [
+        `Translate each text from a shared travel itinerary into natural ${language}. They are place names, tour titles, notes, expense names and packing items.`,
+        lang === 'ko' ? 'For place names use the common Korean name or a natural Hangul transliteration.' : 'For place names use the common English name or a standard romanization.',
+        'Keep numbers, dates, times, prices, booking codes, flight numbers, URLs and emoji exactly as they are. Keep line breaks. If a text is already in that language, return it unchanged.',
+        `Return "texts" with exactly ${texts.length} strings in the same order.`,
+        ...texts.map((n, i) => `${i + 1}. ${JSON.stringify(n)}`),
+      ].join('\n'),
+    }
+  }
   if (b.mode === 'names') {
     const names = Array.isArray(b.names) ? b.names.map((x) => str(x, 120)).filter(Boolean).slice(0, 12) : []
     if (!names.length) return { error: 'bad_request' }
@@ -145,9 +162,9 @@ export async function handlePlan(body: unknown, env: PlanEnv): Promise<PlanResul
   let quotaCount = 0
   // 추가 추천은 빨라야 하므로 생각 단계를 거의 생략하고, 일정 전체는 조금만 생각하게 한다
   const mode = (body as Record<string, unknown>).mode
-  const quick = mode === 'more' || mode === 'names'
+  const quick = mode === 'more' || mode === 'names' || mode === 'texts'
   const perTry = mode === 'names' ? 10_000 : quick ? 20_000 : 45_000
-  const budget = mode === 'names' ? 15_000 : quick ? 34_000 : 85_000
+  const budget = mode === 'names' ? 15_000 : mode === 'texts' ? 25_000 : quick ? 34_000 : 85_000
   const began = Date.now()
   for (const model of models) {
     const remaining = budget - (Date.now() - began)

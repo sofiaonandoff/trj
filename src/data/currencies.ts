@@ -31,7 +31,7 @@ export const CURRENCIES: { code: string; name: string; rate: number }[] = [
 const BY = new Map(CURRENCIES.map((c) => [c.code, c]))
 export const knownCurrency = (code: string) => BY.has(code.toUpperCase())
 
-type RateTrip = Pick<Trip, 'currency' | 'rate' | 'rates' | 'base' | 'ratesEdited'>
+type RateTrip = Pick<Trip, 'currency' | 'rate' | 'rates' | 'base' | 'ratesEdited'> & { budget?: number }
 
 /**
  * 환율은 안에서 모두 '1단위 = 몇 원'으로 둔다 (원화를 가운데 두고 바꾼다).
@@ -47,10 +47,31 @@ export const toWon = (trip: Pick<Trip, 'currency' | 'rate' | 'rates'>, amount: n
 /** 화면에 쓰는 통화 이름: 원화는 '원', 나머지는 코드 */
 export const unit = (code: string) => (code === 'KRW' ? tr('원') : code)
 
-/** 새 여행의 기준 화폐: 한국어로 쓰면 원화, 영어로 쓰면 달러 */
+/** 화면 언어의 처음 기준 화폐: 한국어는 원화, 영어는 달러 */
 export const defaultBase = () => (lang === 'en' ? 'USD' : 'KRW')
-/** 합계·예산·정산을 보여 줄 화폐 */
-export const baseOf = (trip: Pick<Trip, 'base'>) => trip.base ?? 'KRW'
+
+/*
+ * 기준 화폐(합계·예산·정산을 보여 줄 화폐)는 여행이 아니라 보는 사람마다 정한다.
+ * 같은 여행을 함께 쓰는 한국인은 원화로, 외국인 동행은 달러로 볼 수 있다.
+ * 화면 언어마다 이 기기에 기억한다 (한국어 화면 ↔ 영어 화면을 바꾸면 각각 맞춰 둔 화폐로).
+ */
+const baseKey = () => `trj-base-${lang}`
+let viewer: string = (() => { try { return localStorage.getItem(baseKey()) ?? defaultBase() } catch { return defaultBase() } })()
+const baseListeners = new Set<() => void>()
+export const onBaseChange = (f: () => void) => { baseListeners.add(f); return () => { baseListeners.delete(f) } }
+export const viewerBase = () => viewer
+/** 보는 사람의 기준 화폐를 바꾼다 (이 기기, 지금 화면 언어) */
+export function setViewerBase(code: string) {
+  viewer = code
+  try { localStorage.setItem(baseKey(), code) } catch { /* 이번 실행에서만 */ }
+  baseListeners.forEach((f) => f())
+}
+/** 합계·예산·정산을 보여 줄 화폐 (보는 사람의 기준 화폐) */
+export const baseOf = (_trip?: unknown) => viewer
+/** 예산 금액(Trip.budget)이 적힌 화폐 */
+export const budgetCurrency = (trip: Pick<Trip, 'base'>) => trip.base ?? 'KRW'
+/** 예산을 원화로 */
+export const budgetKrw = (trip: RateTrip) => trip.budget ? trip.budget * rateOf(trip, budgetCurrency(trip)) : 0
 /** 원화 금액을 기준 화폐로 */
 export const krwToBase = (trip: RateTrip, krw: number) => { const r = rateOf(trip, baseOf(trip)); return r > 0 ? krw / r : 0 }
 /** 어떤 화폐 금액을 기준 화폐로 */
@@ -112,9 +133,8 @@ export function resetRate(t: Trip, code: string) {
   else if (t.rates) { const { [c]: _gone, ...rest } = t.rates; t.rates = rest }
   t.ratesEdited = (t.ratesEdited ?? []).filter((x) => x !== c)
 }
-/** 기준 화폐를 바꾼다. 예산 금액은 새 기준 화폐로 바꿔 둔다 */
-export function setBase(t: Trip, code: string) {
-  const from = rateOf(t, baseOf(t)), to = rateOf(t, code)
-  if (t.budget > 0 && to > 0) t.budget = Math.round((t.budget * from) / to * 100) / 100
-  t.base = code
+/** 예산을 보는 사람의 기준 화폐 금액으로 넣는다 (예산 화폐도 그 화폐로 바뀐다) */
+export function setBudget(t: Trip, amount: number) {
+  t.budget = amount > 0 ? amount : 0
+  t.base = viewer
 }

@@ -1,4 +1,5 @@
 import { tr } from '../i18n'
+import { tx, useTranslations } from '../lib/translate'
 import { Reorder, useDragControls } from 'framer-motion'
 import { BedDouble, Camera, Check, Clock, ExternalLink, GripVertical, MapPin, Plane, Plus, Route, Search, Sparkles, Trash2 } from 'lucide-react'
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
@@ -26,6 +27,7 @@ const CATS = Object.keys(CATEGORY) as Category[]
 const day0date = (t: Trip, i: number) => t.days[Math.min(i, t.days.length - 1)]?.date ?? t.start
 
 export default function PlanTab({ trip }: { trip: Trip }) {
+  useTranslations()
   const mutate = useStore((s) => s.mutate)
   const [idx, setIdx] = useState(0)
   /** 장소 추가 시트: 닫힘(false) 또는 처음 보여 줄 탭 */
@@ -99,7 +101,7 @@ export default function PlanTab({ trip }: { trip: Trip }) {
 
       {line.length === 0 ? (
         <div className="empty">
-          <strong>{tr('{0}에서 보낼 하루가 비어 있습니다', leg.city)}</strong>
+          <strong>{tr('{0}에서 보낼 하루가 비어 있습니다', tx(leg.city))}</strong>
           {tr('trj assistant가 이 날 머무는 곳 가까이에서 갈 만한 곳을 골라 드립니다.')}
           <div style={{ marginTop: 16 }}>
             <button className="btn btn-primary" onClick={() => setAdding('ai-auto')}><Sparkles size={18} />{tr('trj assistant에게 추천받기')}</button>
@@ -139,7 +141,7 @@ export default function PlanTab({ trip }: { trip: Trip }) {
       )}
       {line.length > 0 && day.items.length === 0 && (
         <div className="empty slim">
-          {tr('{0}에서 갈 곳이 아직 없습니다', leg.city)}
+          {tr('{0}에서 갈 곳이 아직 없습니다', tx(leg.city))}
           <div style={{ marginTop: 10 }}>
             <button className="btn btn-ghost" onClick={() => setAdding('ai-auto')}><Sparkles size={16} />{tr('trj assistant에게 추천받기')}</button>
           </div>
@@ -188,13 +190,13 @@ function PlaceRow({ p, n, next, only, onOpen, onToggle, paid, est }: { p: Place;
       <div className="tl-body">
         <div className={`card${p.done ? ' done' : ''}`}>
           <button className="card-main" onClick={onOpen}>
-            <h3>{p.name}</h3>
+            <h3>{tx(p.name)}</h3>
             <div className="sub">
               <span className="cat" style={{ color: c.color }}>{c.label}</span>
               {p.duration ? <span>{fmtDur(p.duration)}</span> : null}
               {paid ? <span className="paid">{paid}</span> : est ? <span>{tr('1인 약 {0}', est)}</span> : null}
             </div>
-            {p.note && <div className="note">{p.note}</div>}
+            {p.note && <div className="note">{tx(p.note)}</div>}
           </button>
           <div className="grip" onPointerDown={(e) => controls.start(e)} aria-hidden="true"><GripVertical size={18} /></div>
         </div>
@@ -262,7 +264,7 @@ export function StayRow({ e, date, next, only, onOpen }: { e: Extract<Entry, { k
       <div className="tl-body">
         <button className="stay-card" onClick={onOpen} aria-label={tr('{0} 숙소 수정', s.name)}>
           <span className="stay-kind">{title}</span>
-          <b>{s.name}</b>
+          <b>{tx(s.name)}</b>
           <small>{sub}{s.code ? ` · ${tr('예약')} ${s.code}` : ''}</small>
         </button>
         {start ? <Hop from={s} to={next} /> : <div style={{ height: 14 }} />}

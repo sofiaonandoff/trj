@@ -1,4 +1,5 @@
 import { tr } from '../i18n'
+import { tx, useTranslations } from '../lib/translate'
 import { Check, Mail, UserPlus, X } from 'lucide-react'
 import { useState } from 'react'
 import { destination } from '../data/destinations'
@@ -10,6 +11,7 @@ import { Avatar, toast } from './ui'
 
 /** readOnly: 로그인 없이 보는 링크에서 쓴다 */
 export default function PrepTab({ trip, readOnly = false }: { trip: Trip; readOnly?: boolean }) {
+  useTranslations()
   const mutate = useStore((s) => s.mutate)
   const [text, setText] = useState('')
   const [group, setGroup] = useState(tr('짐'))
@@ -54,14 +56,14 @@ export default function PrepTab({ trip, readOnly = false }: { trip: Trip; readOn
 
       {groups.map((g) => (
         <section className="panel" key={g}>
-          <h2 style={{ marginBottom: 4 }}>{g}</h2>
+          <h2 style={{ marginBottom: 4 }}>{tx(g)}</h2>
           {trip.checklist.filter((c) => c.group === g).map((c) => {
             const who = trip.members.find((m) => m.id === c.assignee)
             return (
               <div key={c.id} className={`check${c.done ? ' done' : ''}`}>
                 <button className="box" role="checkbox" aria-checked={c.done} aria-label={c.text} disabled={readOnly}
                   onClick={() => { haptic(); mutate(trip.id, (t) => { const x = t.checklist.find((y) => y.id === c.id)!; x.done = !x.done }) }}><Check size={16} strokeWidth={3} /></button>
-                <span>{c.text}</span>
+                <span>{tx(c.text)}</span>
                 {readOnly ? (who ? <Avatar m={who} /> : null) : trip.members.length > 1 && (
                   <button onClick={() => cycle(c.id)} aria-label={tr('담당: {0}. 눌러서 바꾸기', who?.name ?? tr('없음'))}>
                     {who ? <Avatar m={who} /> : <span className="avatar" style={{ background: 'var(--sunk)', color: 'var(--mute)' }}>+</span>}
@@ -78,7 +80,7 @@ export default function PrepTab({ trip, readOnly = false }: { trip: Trip; readOn
       {!readOnly && <><section className="panel">
         <h2>{tr('준비물 추가')}</h2>
         <div className="chips">
-          {[...new Set([...groups, tr('짐'), tr('서류'), tr('전자기기')])].map((g) => <button key={g} className="chip" aria-pressed={group === g} onClick={() => setGroup(g)}>{g}</button>)}
+          {[...new Set([...groups, tr('짐'), tr('서류'), tr('전자기기')])].map((g) => <button key={g} className="chip" aria-pressed={group === g} onClick={() => setGroup(g)}>{tx(g)}</button>)}
         </div>
         <div className="inline-add">
           <input className="input" placeholder={tr('예: 수영복')} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addItem()} />

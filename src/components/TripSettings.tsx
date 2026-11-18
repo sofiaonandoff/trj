@@ -1,4 +1,5 @@
 import { tr } from '../i18n'
+import { setTranslateOn, translateOn } from '../lib/translate'
 import { AlertTriangle, Download, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { trashTrip } from '../lib/drive'
@@ -22,6 +23,7 @@ export default function TripSettings({ trip, open, onClose, onDeleted }: { trip:
   const remove = useStore((s) => s.remove)
   const [confirm, setConfirm] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [translate, setTranslate] = useState(translateOn())
   const inDrive = Boolean(trip.drive?.fileId)
   const mine = inDrive && trip.drive?.role !== 'editor'
   const sharedWithOthers = trip.drive?.role === 'owner'
@@ -79,6 +81,12 @@ export default function TripSettings({ trip, open, onClose, onDeleted }: { trip:
           <label className="field"><span>{tr('돌아오는 날')}</span><input type="date" value={draft.end} min={draft.start} onChange={(e) => setDates(draft.start, e.target.value)} /></label>
         </div>
         <p className="hint" style={{ marginTop: -6 }}>{tr('기간을 줄이면 빠지는 날의 일정은 마지막 날로 옮겨집니다.')}</p>
+
+        <label className="check-line">
+          <input type="checkbox" checked={translate} onChange={(e) => { setTranslateOn(e.target.checked); setTranslate(e.target.checked) }} />
+          <span>{tr('함께 쓰는 사람이 다른 언어로 적은 내용을 화면 언어로 옮겨 보기')}
+            <small>{tr('장소·숙소 이름, 메모, 지출, 준비물을 이 기기에서만 옮겨 보여 줍니다. 원래 글은 바뀌지 않고, 고칠 때는 원래 글이 나옵니다. 옮기는 데 AI(Gemini)를 씁니다.')}</small></span>
+        </label>
 
         {!confirm ? (
           <button className="btn btn-ghost danger-btn" onClick={() => setConfirm(true)}><Trash2 size={18} />{tr('이 여행 전체 삭제')}</button>
