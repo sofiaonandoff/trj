@@ -9,8 +9,10 @@ import { legOf } from '../lib/legs'
 import { flightMinutes, isComplete, parseFlightText } from '../lib/flight'
 import { localizeResults, searchPlaces, type GeoResult } from '../lib/geocode'
 import { poiToPlace, retime, shortest, suggestions } from '../lib/planner'
-import { arc, dateRange, distLabel, fmtDur, fromMin, haptic, km, md, toMin, travelLabel, travelMin, uid, weekday, wonShort } from '../lib/util'
-import { putFlight, useStore } from '../store'
+import { arc, dateRange, distLabel, fmtDur, fromMin, haptic, km, md, toMin, travelLabel, travelMin, uid, weekday, won, wonShort } from '../lib/util'
+import { putFlight, removePlace, syncPlaceCost, useStore } from '../store'
+import CurrencySelect from './CurrencySelect'
+import { toWon, unit } from '../data/currencies'
 import type { Category, Flight, Place, Trip } from '../types'
 import type { MapPoint } from './MapView'
 import PhotoImport from './PhotoImport'
@@ -61,7 +63,10 @@ export default function PlanTab({ trip }: { trip: Trip }) {
     return { points, arcs, route: routeSegments(line), picks }
   }, [line])
 
-  const dayCost = day.items.reduce((s, p) => s + (p.cost ?? 0), 0)
+  /** 예약 비용으로 기록한 지출: '89 NZD' */
+  const paidOf = (p: Place) => { const x = p.expenseId ? trip.expenses.find((e) => e.id === p.expenseId) : undefined; return x ? `${x.amount.toLocaleString('ko-KR')} ${unit(x.currency)}` : undefined }
+  const dayCost = day.items.reduce((s, p) => s + (p.expenseId ? 0 : p.cost ?? 0), 0)
+  const dayPaid = day.items.reduce((s, p) => { const x = p.expenseId ? trip.expenses.find((e) => e.id === p.expenseId) : undefined; return s + (x ? toWon(trip, x.amount, x.currency) : 0) }, 0)
   const dayDist = day.items.slice(1).reduce((s, p, i) => s + km(day.items[i], p), 0)
 
   return (
@@ -86,6 +91,7 @@ export default function PlanTab({ trip }: { trip: Trip }) {
           <p>
             {day.items.length ? tr('{0}곳', day.items.length) : tr('아직 장소가 없습니다')}
             {dayDist > 0 && tr(' · 이동 {0}', distLabel(dayDist))}
+            {dayPaid > 0 && tr(' · 예약 비용 {0}', wonShort(dayPaid))}
             {dayCost > 0 && tr(' · 1인 약 {0}', wonShort(dayCost))}
           </p>
         </div>
@@ -110,7 +116,7 @@ export default function PlanTab({ trip }: { trip: Trip }) {
                 return <FlightRow key={`${e.arriving ? 'a' : 'd'}${e.flight.id}`} e={e} next={next} only={only} onOpen={() => setFlight(e.flight)} />
               case 'place':
                 return (
-                  <PlaceRow key={e.place.id} p={e.place} n={e.index + 1} next={next} only={only}
+                  <PlaceRow key={e.place.id} p={e.place} n={e.index + 1} next={next} only={only} paid={paidOf(e.place)}
                     onOpen={() => setEditId(e.place.id)}
                     onToggle={() => { haptic(); mutate(trip.id, (t) => { const x = t.days[di].items[e.index]; x.done = !x.done }) }} />
                 )
@@ -167,7 +173,7 @@ export default function PlanTab({ trip }: { trip: Trip }) {
   )
 }
 
-function PlaceRow({ p, n, next, only, onOpen, onToggle }: { p: Place; n: number; next?: LL; only: boolean; onOpen: () => void; onToggle: () => void }) {
+function PlaceRow({ p, n, next, only, onOpen, onToggle, paid }: { p: Place; n: number; next?: LL; only: boolean; onOpen: () => void; onToggle: () => void; paid?: string }) {
   const controls = useDragControls()
   const c = CATEGORY[p.category]
   return (
@@ -186,7 +192,7 @@ function PlaceRow({ p, n, next, only, onOpen, onToggle }: { p: Place; n: number;
             <div className="sub">
               <span className="cat" style={{ color: c.color }}>{c.label}</span>
               {p.duration ? <span>{fmtDur(p.duration)}</span> : null}
-              {p.cost ? <span>{wonShort(p.cost)}</span> : null}
+              {paid ? <span className="paid">{paid}</span> : p.cost ? <span>{tr('1인 약 {0}', wonShort(p.cost))}</span> : null}
             </div>
             {p.note && <div className="note">{p.note}</div>}
           </button>
@@ -396,7 +402,15 @@ function EditPlaceSheet({ trip, di, id, onClose, onMakeStay }: { trip: Trip; di:
   const source = trip.days[di]?.items.find((p) => p.id === id)
   const [d, setD] = useState<Place>()
   const [moveTo, setMoveTo] = useState(di)
-  useEffect(() => { if (source) { setD({ ...source }); setMoveTo(di) } }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
+  // 전체 예약 비용: 예산의 지출과 묶인다
+  const [cost, setCost] = useState('')
+  const [currency, setCurrency] = useState(trip.currency)
+  useEffect(() => {
+    if (!source) return
+    setD({ ...source }); setMoveTo(di)
+    const e = source.expenseId ? trip.expenses.find((x) => x.id === source.expenseId) : undefined
+    setCost(e ? String(e.amount) : ''); setCurrency(e?.currency ?? trip.currency)
+  }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
   const set = (patch: Partial<Place>) => setD((x) => (x ? { ...x, ...patch } : x))
 
   const save = () => {
@@ -405,15 +419,20 @@ function EditPlaceSheet({ trip, di, id, onClose, onMakeStay }: { trip: Trip; di:
       const items = t.days[di].items
       const i = items.findIndex((p) => p.id === d.id)
       if (i < 0) return
-      if (moveTo === di) items[i] = d
-      else { items.splice(i, 1); t.days[moveTo].items.push(d) }
+      const p = { ...d, name: d.name.trim() }
+      const amount = Number(cost.replace(/[^\d.]/g, ''))
+      const had = Boolean(p.expenseId)
+      syncPlaceCost(t, p, t.days[moveTo].date, { amount: amount > 0 ? amount : 0, currency })
+      if (moveTo === di) items[i] = p
+      else { items.splice(i, 1); t.days[moveTo].items.push(p) }
+      if (!had && p.expenseId) toast(tr('예약 비용을 예산에 기록했습니다'))
     })
     if (moveTo !== di) toast(tr('{0}일차로 옮겼습니다', moveTo + 1))
     onClose()
   }
   const remove = () => {
-    mutate(trip.id, (t) => { t.days[di].items = t.days[di].items.filter((p) => p.id !== id) })
-    toast(tr('장소를 삭제했습니다')); onClose()
+    mutate(trip.id, (t) => { if (id) removePlace(t, id) })
+    toast(source?.expenseId ? tr('장소와 예약 비용 지출을 삭제했습니다') : tr('장소를 삭제했습니다')); onClose()
   }
 
   return (
@@ -436,7 +455,16 @@ function EditPlaceSheet({ trip, di, id, onClose, onMakeStay }: { trip: Trip; di:
             </button>
           )}
           <div className="row">
-            <label className="field"><span>{tr('1인 예상 비용(원)')}</span><input type="number" inputMode="numeric" min={0} step={1000} value={d.cost ?? ''} onChange={(e) => set({ cost: e.target.value ? Number(e.target.value) : undefined })} /></label>
+            <label className="field"><span>{tr('전체 예약 비용 (예산에 기록)')}</span>
+              <input inputMode="decimal" value={cost} placeholder="0" onChange={(e) => setCost(e.target.value)} /></label>
+            <CurrencySelect trip={trip} value={currency} onChange={setCurrency} />
+          </div>
+          <p className="hint" style={{ marginTop: -8 }}>
+            {Number(cost) > 0 && currency !== 'KRW' ? tr('약 {0}. ', won(toWon(trip, Number(cost), currency))) : ''}
+            {tr('투어·입장권·예약처럼 낸 돈 전체를 적으면 예산 탭의 지출로 들어갑니다. 결제한 사람과 나눌 사람은 예산 탭에서 고칠 수 있습니다.')}
+            {d.cost && !cost ? ` ${tr('추천 때 넣은 1인 예상 비용: {0}', wonShort(d.cost))}` : ''}
+          </p>
+          <div className="row">
             <label className="field"><span>{tr('날짜')}</span>
               <select value={moveTo} onChange={(e) => setMoveTo(Number(e.target.value))}>
                 {trip.days.map((x, i) => <option key={x.date} value={i}>{tr('{0}일차 ({1} {2})', i + 1, md(x.date), weekday(x.date))}</option>)}

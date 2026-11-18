@@ -308,6 +308,8 @@ export function applyDraft(t: Trip, d: Draft, putFlight: (t: Trip, f: Flight) =>
       const me = t.members[0]?.id ?? ''
       t.expenses.push({ ...e, payer: me, split: t.members.map((m) => m.id) })
       res.expenseId = e.id
+      // 새로 넣은 장소면 비용을 장소에 묶는다 (장소에서 금액·통화를 고치고, 장소를 지우면 함께 지워진다)
+      if (res.placeAdded) { const p = day?.items.find((x) => x.id === res.placeId); if (p) p.expenseId = e.id }
     }
     res.amount = { value: e.amount, currency: e.currency }
   }

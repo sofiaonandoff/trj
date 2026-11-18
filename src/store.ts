@@ -7,7 +7,7 @@ import { defaultChecklist, fitAfterArrival, planTrip, type Pace } from './lib/pl
 import { airport } from './data/airports'
 import { addDays, dateRange, today, uid } from './lib/util'
 import { stamp } from './lib/merge'
-import type { Category, Day, DriveLink, Flight, Leg, Stay, Trip } from './types'
+import type { Category, Day, DriveLink, ExpenseCategory, Flight, Leg, Place, Stay, Trip } from './types'
 
 export const MEMBER_COLORS = ['#2F5D57', '#B0603A', '#5C7F4E', '#96506A', '#5E5A86', '#8A6A48']
 
@@ -74,6 +74,38 @@ export function putStay(t: Trip, stay: Stay, cost?: { amount: number; currency: 
   if (s.checkIn < t.start) t.start = s.checkIn
   if (s.checkOut > t.end) t.end = s.checkOut
   syncDays(t)
+}
+
+/** 장소 종류에 맞는 지출 항목 */
+export const expenseCategoryOf = (c: Category): ExpenseCategory => (c === 'food' || c === 'cafe' ? 'food' : c === 'shop' ? 'shop' : c === 'stay' ? 'stay' : c === 'move' ? 'move' : 'play')
+
+/**
+ * 장소의 예약 비용(투어·입장권·식당 예약 등 전체 금액)을 예산 지출과 맞춘다.
+ * 금액이 있으면 그 날짜의 지출로 만들거나 고치고, 0이면 묶인 지출을 지운다. 결제한 사람·나눌 사람은 예산 탭에서 고친다.
+ */
+export function syncPlaceCost(t: Trip, place: Place, date: string, cost?: { amount: number; currency: string }) {
+  const linked = place.expenseId ? t.expenses.find((e) => e.id === place.expenseId) : undefined
+  if (cost && cost.amount > 0) {
+    if (linked) Object.assign(linked, { title: place.name, amount: cost.amount, currency: cost.currency, date })
+    else {
+      const id = uid()
+      t.expenses.push({ id, title: place.name, amount: cost.amount, currency: cost.currency, category: expenseCategoryOf(place.category), payer: t.members[0]?.id ?? '', split: t.members.map((m) => m.id), date })
+      place.expenseId = id
+    }
+  } else if (linked) {
+    t.expenses = t.expenses.filter((e) => e.id !== linked.id)
+    place.expenseId = undefined
+  } else if (place.expenseId) place.expenseId = undefined
+}
+
+/** 장소를 지운다. 예약 비용으로 묶인 지출도 함께 */
+export function removePlace(t: Trip, id: string) {
+  for (const d of t.days) {
+    const p = d.items.find((x) => x.id === id)
+    if (!p) continue
+    d.items = d.items.filter((x) => x.id !== id)
+    if (p.expenseId) t.expenses = t.expenses.filter((e) => e.id !== p.expenseId)
+  }
 }
 
 export function removeStay(t: Trip, id: string) {

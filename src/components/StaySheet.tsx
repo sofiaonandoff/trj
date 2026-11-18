@@ -1,4 +1,5 @@
 import { tr } from '../i18n'
+import CurrencySelect from './CurrencySelect'
 import { BedDouble, Copy, MapPin, Search, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { DEFAULT_IN, DEFAULT_OUT } from '../lib/dayline'
@@ -153,11 +154,7 @@ export default function StaySheet({ trip, stay, onClose }: { trip: Trip; stay?: 
             <label className="field"><span>{tr('숙박비 (예산에 기록)')}</span>
               <input inputMode="decimal" value={cost} placeholder="0" onChange={(e) => setCost(e.target.value)} />
             </label>
-            <label className="field" style={{ flex: '0 0 96px' }}><span>{tr('통화')}</span>
-              <select value={currency} onChange={(e) => setCurrency(e.target.value)}>
-                {[...new Set(['KRW', trip.currency])].map((c) => <option key={c}>{c}</option>)}
-              </select>
-            </label>
+            <CurrencySelect trip={trip} value={currency} onChange={setCurrency} />
           </div>
           <label className="field"><span>{tr('예약번호')}</span>
             <div className="input-btn">

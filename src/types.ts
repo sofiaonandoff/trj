@@ -10,7 +10,9 @@ export interface Place {
   category: Category
   time?: string // HH:MM
   duration?: number // 분
-  cost?: number // 원 (1인 예상)
+  cost?: number // 원 (1인 예상, AI 추천이 넣는 어림값. 예산에는 들어가지 않는다)
+  /** 이 장소의 예약 비용으로 예산에 기록한 지출 (장소와 함께 고쳐지고 지워진다) */
+  expenseId?: string
   note?: string
   done?: boolean
 }

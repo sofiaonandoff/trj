@@ -586,4 +586,12 @@ export const EN: Record<string, string> = {
   "기간을 바꾸지 못했습니다": "Couldn't change the dates",
   "옵션 {0}": "Option {0}",
   "미팅 포인트 {0}": "Meeting point {0}",
+  " · 예약 비용 {0}": " · Booked {0}",
+  "1인 약 {0}": "About {0} pp",
+  "예약 비용을 예산에 기록했습니다": "Booking cost added to the budget",
+  "장소와 예약 비용 지출을 삭제했습니다": "Deleted the place and its booking cost",
+  "전체 예약 비용 (예산에 기록)": "Total booking cost (goes to budget)",
+  "약 {0}. ": "About {0}. ",
+  "투어·입장권·예약처럼 낸 돈 전체를 적으면 예산 탭의 지출로 들어갑니다. 결제한 사람과 나눌 사람은 예산 탭에서 고칠 수 있습니다.": "Enter the full amount paid for a tour, ticket or booking and it's added to the budget as an expense. Change who paid and who splits it in the budget tab.",
+  "추천 때 넣은 1인 예상 비용: {0}": "Suggested estimate per person: {0}",
 }
