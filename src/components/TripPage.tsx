@@ -154,6 +154,16 @@ function ViewLink({ trip }: { trip: Trip }) {
     toast(tr('보기 링크를 만들었습니다'))
     await send(link)
   })
+  // 위젯은 짧은 보기 링크(앱 서버)로만 동작한다. Drive 보기 링크만 있으면 짧은 링크를 새로 만들어 본다
+  const openWidget = () => run(async () => {
+    if (!saved) {
+      try { await createViewLink(trip) } catch (e) {
+        if (e instanceof NoViewServer) { toast(tr('홈 화면 위젯을 쓰려면 앱 서버에 보기 저장소(Cloudflare KV, TRJ_VIEWS)를 연결해야 합니다')); return }
+        throw e
+      }
+    }
+    setWidget(true)
+  })
   const stop = () => run(async () => {
     if (saved) await removeViewLink(trip.id)
     if (drive && owner) await stopViewLink(trip.id)
@@ -173,9 +183,7 @@ function ViewLink({ trip }: { trip: Trip }) {
           {(saved || owner) && <button className="btn btn-quiet" disabled={busy} onClick={stop}>{tr('끄기')}</button>}
         </div>
       ) : <button className="btn btn-primary btn-block" disabled={busy} onClick={make}><Eye size={18} />{tr('보기 링크 만들기')}</button>}
-      {saved
-        ? <button className="btn btn-quiet btn-block" style={{ marginTop: 8 }} onClick={() => setWidget(true)}><Smartphone size={16} />{tr('아이폰 홈 화면 위젯 만들기')}</button>
-        : drive && <p className="hint">{tr('홈 화면 위젯은 짧은 보기 링크에서 쓸 수 있습니다 (앱 서버에 보기 저장소 연결 필요).')}</p>}
+      {url && <button className="btn btn-quiet btn-block" style={{ marginTop: 8 }} disabled={busy} onClick={openWidget}><Smartphone size={16} />{tr('아이폰 홈 화면 위젯 만들기')}</button>}
       {saved && <WidgetSheet open={widget} onClose={() => setWidget(false)} viewId={saved.id} />}
     </section>
   )
