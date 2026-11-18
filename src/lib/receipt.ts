@@ -502,7 +502,7 @@ export function stayOf(lines: string[], days: string[]): Reading['stay'] {
 
 /** 투어·액티비티 바우처 */
 const TOUR = /get\s*your\s*guide|getyourguide|\bGYG[A-Z0-9]{6,}|klook|kkday|viator|마이리얼트립|와그|미팅\s*포인트|meeting\s*point|집합\s*(장소|시간)|만나는\s*곳|\btour\b|투어|액티비티|activity|체험|excursion|cruise|크루즈/i
-const OUTDOOR = /kayak|카약|hike|hiking|trek|하이킹|트레킹|snorkel|스노클|dive|diving|다이빙|cruise|크루즈|whale|고래|seal|물개|dolphin|돌고래|national\s*park|국립공원|glacier|빙하|rafting|래프팅|surf|서핑|horse|승마|safari|사파리|mountain|산행|bike|자전거/i
+const OUTDOOR = /kayak|카약|hike|hiking|trek|하이킹|트레킹|snorkel|스노클|dive|diving|다이빙|cruise|크루즈|whale|고래|seal|물개|dolphin|돌고래|national\s*park|국립공원|glacier|빙하|rafting|래프팅|surf|서핑|horse|승마|safari|사파리|mountain|마운틴|산행|bike|자전거|별보기|stargaz|선셋|sunset|동물원|zoo|wildlife/i
 const MEET = /^\s*(?:\S{0,3}\s*)?(미팅\s*포인트|meeting\s*point|집합\s*장소|만나는\s*곳|pick-?\s*up\s*(point|location)?|픽업\s*(장소|위치)?)\s*[:：]?\s*/i
 /** 줄이 나뉘어 OCR된 주소의 흔한 오타 */
 const fixAddress = (a: string) => a.replace(/\bZ\W?a?aland\b|Z\S{0,2}aland\b/i, 'Zealand').replace(/\s{2,}.*$/, '').replace(/^[^\p{L}\p{N}]+/u, '').trim()
@@ -514,21 +514,29 @@ const fixAddress = (a: string) => a.replace(/\bZ\W?a?aland\b|Z\S{0,2}aland\b/i, 
  */
 export function readTour(lines: string[]): { name?: string; code?: string; info: TourInfo } {
   // 오른쪽 칸(지도 글씨, QR 옆 글씨)은 두 칸 넘게 띄어져 읽히므로 왼쪽 칸만 쓴다
-  const clean = lines.map((l) => l.replace(/[|_~=*#<>]+/g, ' ').trim().split(/\s{3,}/)[0].replace(/\s+/g, ' ').trim())
+  // (맨 앞이 '-' 같은 기호만인 칸이면 글자가 있는 첫 칸)
+  const clean = lines.map((l) => { const cols = l.replace(/[|_=*#<>]+/g, ' ').trim().split(/\s{3,}/); return (cols.find((c) => /\p{L}{2,}/u.test(c)) ?? cols[0]).replace(/\s+/g, ' ').trim() })
   // 예약번호: 항목이 없어도 맨 위의 영문·숫자가 섞인 긴 낱말 (GetYourGuide의 GYG…)
   const gyg = lines.join(' ').match(/\bGYG[A-Z0-9]{6,14}\b/)?.[0]
   const loose = lines.slice(0, 6).flatMap((l) => l.split(/\s+/)).find((w) => /^(?=[A-Z0-9]*\d)(?=[A-Z0-9]*[A-Z])[A-Z0-9]{8,16}$/.test(w))
   const code = gyg ?? loose
   // 투어 이름: '투어·tour·체험…'이 든 앞쪽 줄. 한국어 화면이면 한글 줄, 아니면 영어 줄을 이름으로
   const titles = clean.slice(0, 14).map((l) => l.replace(/\b[A-Z0-9]{8,16}\b/g, '').replace(/\d+\s*\/\s*\d+\s*(페이지|page)/i, '').trim())
-    .filter((l) => l.length >= 6 && l.length <= 70 && /tour|투어|체험|activity|액티비티|cruise|크루즈|ticket|입장권|pass|class|클래스|kayak|카약|excursion/i.test(l) && !/^\(|옵션|option/i.test(l) && !MEET.test(l))
+    .filter((l) => l.length >= 6 && l.length <= 70 && /tour|투어|체험|activity|액티비티|cruise|크루즈|ticket|입장권|pass|class|클래스|kayak|카약|excursion/i.test(l) && !/^\(|옵션|option/i.test(l) && !/^\S{0,4}\s*\([^)]*\)\s*$/.test(l) && !MEET.test(l))
     // 한글 이름 앞에 붙어 읽힌 로고 글씨(GET YOUR GUIDE → 'sSUIDE')는 뗀다
-    .map((l) => (/[가-힣]/.test(l) ? l.slice(l.search(/[가-힣]/)) : l).replace(/\s*:\s*/, ': ').replace(/^[^\p{L}\p{N}]+/u, '').trim())
+    .map((l) => l
+      // 판매 문구 머리표 ([11월 한정], [특가], [ME 한정]처럼 깨져 읽힌 것)와 이모지·화살표를 뗀다
+      .replace(/^[^\p{L}\p{N}[]+/u, '').replace(/^\[[^\]]{1,12}\]\s*/, '').replace(/^[^\p{L}\p{N}]+/u, '').replace(/[\s>›»]+$/, ''))
+    .map((l) => (/[가-힣]/.test(l) && !/^[가-힣\d]/.test(l) && /^[A-Za-z]{2,8}\s/.test(l) ? l.slice(l.search(/[가-힣]/)) : l).replace(/\s*:\s*/, ': ').trim())
+    // '호주무한투어'처럼 여행사 이름만 있는 짧은 줄은 투어 이름이 아니다
+    .filter((l) => !/^\S{0,3}:\s*\S+(투어|tour|travel|여행사)$/i.test(l))
   const ko = titles.find((l) => /[가-힣]/.test(l))
   const en = titles.find((l) => !/[가-힣]/.test(l))
   const name = lang === 'ko' ? ko ?? en : en ?? ko
   const alt = name === ko ? en : ko
-  const option = clean.map((l) => l.match(/(?:옵션|option)?\s*\(([^()]{3,40})\)\s*$/i)).find((m) => m && /tour|투어|option|옵션|kayak|카약|class|코스|course|ticket|권/i.test(m[1]))?.[1]
+  // 예약 옵션: 마이리얼트립·클룩 예약 내역의 '성인(만14세~), [뉴페별]페더데일+블루마운틴 / 1개' 또는 '옵션 (Seal Kayak tour)'
+  const option = clean.find((l) => /(성인|아동|유아|adult|child|person|인원)/i.test(l) && /\/\s*\d+\s*(개|명|매|인)|[x×]\s*\d+|\d+\s*(명|매)/i.test(l) && l.length <= 80)
+    ?? clean.filter((l) => !titles.some((t) => l.includes(t.slice(0, 12)))).map((l) => l.match(/(?:옵션|option)?\s*\(([^()]{3,40})\)\s*$/i)).find((m) => m && /tour|투어|option|옵션|kayak|카약|class|코스|course|ticket|권/i.test(m[1]))?.[1]
   // 미팅 포인트: 항목 다음 줄(또는 같은 줄)부터 한글 안내 문장이 나오기 전까지가 주소, 그 뒤 몇 줄이 안내
   let address: string | undefined, meeting: string | undefined
   const mi = clean.findIndex((l) => MEET.test(l))
@@ -553,7 +561,9 @@ export function readTour(lines: string[]): { name?: string; code?: string; info:
   }
   // 소요 시간: "소요 시간 3시간", "Duration 2.5 hours"
   const dur = clean.join(' ').match(/(?:소요\s*시간|duration|진행\s*시간)\s*[:：]?\s*(\d+(?:\.\d+)?)\s*(시간|hours?|hrs?|분|min)/i)
-  const duration = dur ? Math.round(Number(dur[1]) * (/분|min/i.test(dur[2]) ? 1 : 60)) : undefined
+  const all = clean.join(' ')
+  const duration = dur ? Math.round(Number(dur[1]) * (/분|min/i.test(dur[2]) ? 1 : 60))
+    : /반일|half[\s-]*day/i.test(all) ? 240 : /일일\s*투어|종일|full[\s-]*day|day\s*tour|day\s*trip/i.test(all) ? 480 : undefined
   return { name, code, info: { alt, option, address, meeting, duration } }
 }
 

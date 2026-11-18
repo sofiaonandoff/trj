@@ -184,6 +184,14 @@ export async function readTripPhoto(file: File, trip: Trip, current: string, onS
       const hit = /,/.test(q) ? hits[0] : hits.find((x) => km(near, x) <= 150)
       if (hit) { where = { lat: hit.lat, lng: hit.lng }; break }
     }
+    // 주소가 없으면 투어 이름의 앞부분(첫 장소 이름: '페더데일 동물원 & 블루마운틴…' → '페더데일 동물원')으로 근처에서 찾는다
+    if (!where && name) {
+      const parts = [...new Set([name.split(/\s*[&+(/:]\s*|\s+-\s+/)[0], name.split(':')[0]])].filter((x) => x && x.length >= 3)
+      for (const q of parts) {
+        const hit = (await searchPlaces(q, near).catch(() => [])).find((x) => !x.airport && km(near, x) <= 150)
+        if (hit) { where = { lat: hit.lat, lng: hit.lng }; break }
+      }
+    }
   }
   if (!r.costOnly && !where) {
     if (gps) {
