@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { DEFAULT_IN, DEFAULT_OUT } from '../lib/dayline'
 import { searchPlaces, type GeoResult } from '../lib/geocode'
 import { legOf } from '../lib/legs'
-import { addDays, dateRange, md, uid, weekday } from '../lib/util'
+import { addDays, dateRange, km, md, uid, weekday } from '../lib/util'
 import { putStay, removeStay, useStore } from '../store'
 import type { Stay, Trip } from '../types'
 import { copy, Sheet, toast } from './ui'
@@ -23,6 +23,9 @@ export default function StaySheet({ trip, stay, onClose }: { trip: Trip; stay?: 
   const [cost, setCost] = useState('')
   const [currency, setCurrency] = useState('KRW')
   const [q, setQ] = useState('')
+  /** 위치가 검색 결과로 정해졌는가. 아니면 저장할 때 주소(없으면 이름)로 위치를 찾는다 */
+  const [pinned, setPinned] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [results, setResults] = useState<GeoResult[]>()
 
   useEffect(() => {
@@ -40,7 +43,7 @@ export default function StaySheet({ trip, stay, onClose }: { trip: Trip; stay?: 
       setD({ id: uid(), name: stay.name ?? '', lat: stay.lat ?? leg.lat, lng: stay.lng ?? leg.lng, checkIn: stay.checkIn, checkOut: out, inTime: DEFAULT_IN, outTime: DEFAULT_OUT })
       setCost(''); setCurrency('KRW')
     }
-    setQ(''); setResults(undefined)
+    setQ(''); setResults(undefined); setPinned('id' in stay || stay.lat !== undefined); setSaving(false)
   }, [stay]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // 숙소 이름 찾기 (머무는 도시 근처 우선)
@@ -56,14 +59,31 @@ export default function StaySheet({ trip, stay, onClose }: { trip: Trip; stay?: 
   const days = trip.days.map((x) => x.date)
   const outOptions = d ? dateRange(addDays(d.checkIn, 1), addDays(trip.end > d.checkIn ? trip.end : d.checkIn, 1)) : []
 
-  const save = () => {
-    if (!d) return
+  /**
+   * 에어비앤비처럼 이름으로는 찾을 수 없는 숙소: 주소를 넣으면 저장할 때 그 주소로 지도 위치를 찾는다.
+   * 주소로도 못 찾으면 머무는 도시 가운데에 두고 알린다.
+   */
+  const locate = async (x: Stay): Promise<{ stay: Stay; found: boolean }> => {
+    if (pinned) return { stay: x, found: true }
+    const near = legOf(trip, x.checkIn)
+    for (const query of [x.address?.trim(), x.name.trim()].filter(Boolean) as string[]) {
+      const hit = (await searchPlaces(query, near).catch(() => [])).find((r) => !r.airport && km(near, r) <= 150)
+      if (hit) return { stay: { ...x, lat: hit.lat, lng: hit.lng }, found: true }
+    }
+    return { stay: x, found: false }
+  }
+
+  const save = async () => {
+    if (!d || saving) return
     if (!d.name.trim()) { toast(tr('숙소 이름을 입력하세요')); return }
     if (d.checkOut <= d.checkIn) { toast(tr('체크아웃은 체크인 다음 날 이후여야 합니다')); return }
+    setSaving(true)
+    const { stay: located, found } = await locate({ ...d, address: d.address?.trim() || undefined })
+    setSaving(false)
     const overlap = (trip.stays ?? []).find((s) => s.id !== d.id && s.checkIn < d.checkOut && d.checkIn < s.checkOut)
     const amount = Number(cost.replace(/[^\d.]/g, ''))
-    mutate(trip.id, (t) => putStay(t, { ...d, name: d.name.trim() }, { amount: amount > 0 ? amount : 0, currency }))
-    toast(overlap ? tr('{0} 숙박 기간과 겹칩니다. 날짜를 확인하세요', overlap.name) : editing ? tr('숙소를 고쳤습니다') : tr('{0} 숙소를 넣었습니다 ({1}박)', d.name.trim(), nights(d.checkIn, d.checkOut)))
+    mutate(trip.id, (t) => putStay(t, { ...located, name: located.name.trim() }, { amount: amount > 0 ? amount : 0, currency }))
+    toast(!found ? tr('지도에서 위치를 찾지 못해 도시 가운데에 두었습니다. 주소를 더 자세히 넣어 보세요') : overlap ? tr('{0} 숙박 기간과 겹칩니다. 날짜를 확인하세요', overlap.name) : editing ? tr('숙소를 고쳤습니다') : tr('{0} 숙소를 넣었습니다 ({1}박)', d.name.trim(), nights(d.checkIn, d.checkOut)))
     onClose()
   }
   const remove = () => {
@@ -76,7 +96,7 @@ export default function StaySheet({ trip, stay, onClose }: { trip: Trip; stay?: 
     <Sheet open={Boolean(stay && d)} onClose={onClose} title={editing ? tr('숙소 수정') : tr('숙소 추가')}
       foot={<>
         {editing && <button className="btn btn-ghost" style={{ flex: 'none', color: 'var(--warn)' }} onClick={remove} aria-label={tr('숙소 삭제')}><Trash2 size={18} /></button>}
-        <button className="btn btn-primary" onClick={save}>{editing ? tr('변경 내용 저장') : tr('숙소 넣기')}</button>
+        <button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? tr('위치 찾는 중') : editing ? tr('변경 내용 저장') : tr('숙소 넣기')}</button>
       </>}>
       {d && (
         <div className="stack">
@@ -94,14 +114,23 @@ export default function StaySheet({ trip, stay, onClose }: { trip: Trip; stay?: 
           {results && results.length > 0 && (
             <div className="list stay-results">
               {results.map((r, i) => (
-                <button key={i} onClick={() => { set({ name: r.name, lat: r.lat, lng: r.lng, address: r.detail }); setResults(undefined); setQ('') }}>
+                <button key={i} onClick={() => { set({ name: r.name, lat: r.lat, lng: r.lng, address: d.address || r.detail }); setPinned(true); setResults(undefined); setQ('') }}>
                   <MapPin size={16} />
                   <span className="grow"><b>{r.name}</b><small>{r.detail}</small></span>
                 </button>
               ))}
             </div>
           )}
-          {d.address ? <p className="hint"><MapPin size={13} /> {d.address}</p> : q.trim().length >= 2 && !results ? <p className="hint"><Search size={13} /> {tr('찾는 중')}</p> : null}
+          {q.trim().length >= 2 && !results && <p className="hint" style={{ marginTop: -6 }}><Search size={13} /> {tr('찾는 중')}</p>}
+
+          <label className="field"><span>{tr('주소 (선택)')}</span>
+            <div className="input-btn">
+              <input value={d.address ?? ''} placeholder={tr('에어비앤비처럼 이름으로 안 나오면 주소를 넣으세요')} autoComplete="street-address"
+                onChange={(e) => { set({ address: e.target.value || undefined }); setPinned(false) }} />
+              {d.address && <button className="icon-btn" onClick={() => copy(d.address!, tr('주소를 복사했습니다'))} aria-label={tr('주소 복사')}><Copy size={16} /></button>}
+            </div>
+          </label>
+          <p className="hint" style={{ marginTop: -6 }}>{pinned ? tr('지도 위치가 정해졌습니다. 주소를 고치면 저장할 때 그 주소로 다시 찾습니다.') : tr('저장할 때 주소(없으면 이름)로 지도 위치를 찾습니다. 택시 기사에게 보여 줄 때 주소 복사를 쓰세요.')}</p>
 
           <div className="row">
             <label className="field"><span>{tr('체크인')}</span>
@@ -138,7 +167,7 @@ export default function StaySheet({ trip, stay, onClose }: { trip: Trip; stay?: 
           </label>
           <label className="field"><span>{tr('메모')}</span><textarea rows={2} value={d.note ?? ''} onChange={(e) => set({ note: e.target.value || undefined })} placeholder={tr('조식 포함, 얼리 체크인 요청, 짐 맡기기')} /></label>
           {editing && (
-            <a className="btn btn-quiet" href={`https://www.google.com/maps/search/?api=1&query=${d.lat},${d.lng}`} target="_blank" rel="noreferrer">
+            <a className="btn btn-quiet" href={`https://www.google.com/maps/search/?api=1&query=${pinned || !d.address ? `${d.lat},${d.lng}` : encodeURIComponent(d.address)}`} target="_blank" rel="noreferrer">
               <MapPin size={16} />{tr('지도 앱에서 열기')}
             </a>
           )}

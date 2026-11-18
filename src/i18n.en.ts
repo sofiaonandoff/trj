@@ -419,4 +419,12 @@ export const EN: Record<string, string> = {
   "지우는 중": "Deleting",
   "삭제": "Delete",
   "Drive 파일을 지우지 못했습니다": "Couldn't delete the Drive file",
+  "주소 (선택)": "Address (optional)",
+  "에어비앤비처럼 이름으로 안 나오면 주소를 넣으세요": "For places like Airbnb that don't show up by name, add the address",
+  "주소를 복사했습니다": "Address copied",
+  "주소 복사": "Copy address",
+  "지도 위치가 정해졌습니다. 주소를 고치면 저장할 때 그 주소로 다시 찾습니다.": "Location set on the map. If you change the address, it's looked up again when you save.",
+  "저장할 때 주소(없으면 이름)로 지도 위치를 찾습니다. 택시 기사에게 보여 줄 때 주소 복사를 쓰세요.": "When you save, the location is found from the address (or the name). Copy the address to show a taxi driver.",
+  "위치 찾는 중": "Finding location",
+  "지도에서 위치를 찾지 못해 도시 가운데에 두었습니다. 주소를 더 자세히 넣어 보세요": "Couldn't find it on the map, so it's placed in the city center. Try a more detailed address",
 }
