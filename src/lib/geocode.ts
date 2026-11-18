@@ -22,7 +22,8 @@ const guess = (cls: string, type: string): Category => {
   if (cls === 'shop' || /mall|marketplace/.test(type)) return 'shop'
   if (/park|garden|beach|peak|forest|nature/.test(type) || cls === 'natural') return 'nature'
   if (/museum|gallery|temple|shrine|place_of_worship|theatre|castle/.test(type)) return 'culture'
-  if (/hotel|hostel|guest_house|apartment/.test(type)) return 'stay'
+  if (/hotel|hostel|guest_house|apartment|motel/.test(type)) return 'stay'
+  if (cls === 'aeroway' || cls === 'railway' || /aerodrome|terminal|station|bus_station|ferry_terminal|halt|subway_entrance/.test(type)) return 'move'
   return 'sight'
 }
 
@@ -48,7 +49,7 @@ export function searchAirports(q: string): GeoResult[] {
     if (/^[a-z]{3}$/.test(query.trim()) && a.code.toLowerCase() === query.trim()) return true
     return askedAirport && words.every((w) => hay.includes(w))
   }).map((a) => ({
-    name: `${a.name} (${a.code})`, detail: `${a.city} · ${tr('공항')}`, lat: a.lat, lng: a.lng, country: '', category: 'sight' as Category, airport: a.code,
+    name: `${a.name} (${a.code})`, detail: `${a.city} · ${tr('공항')}`, lat: a.lat, lng: a.lng, country: '', category: 'move' as Category, airport: a.code,
   }))
 }
 

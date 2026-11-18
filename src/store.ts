@@ -6,7 +6,7 @@ import { cityLabel, legEnds, newLegId } from './lib/legs'
 import { defaultChecklist, planTrip, type Pace } from './lib/planner'
 import { addDays, dateRange, today, uid } from './lib/util'
 import { stamp } from './lib/merge'
-import type { Category, Day, DriveLink, Flight, Leg, Trip } from './types'
+import type { Category, Day, DriveLink, Flight, Leg, Stay, Trip } from './types'
 
 export const MEMBER_COLORS = ['#2F5D57', '#B0603A', '#5C7F4E', '#96506A', '#5E5A86', '#8A6A48']
 
@@ -46,6 +46,40 @@ export function syncDays(t: Trip) {
   const orphan = t.days.filter((d) => !dates.includes(d.date)).flatMap((d) => d.items)
   t.days = dates.map((date) => t.days.find((d) => d.date === date) ?? { date, items: [] })
   if (orphan.length) t.days[t.days.length - 1].items.push(...orphan)
+}
+
+/**
+ * 숙소를 저장한다. 숙박비가 있으면 체크인 날의 숙박 지출로 예산에 남기고, 지출은 숙소와 함께 고쳐지고 지워진다.
+ * 기간이 여행 밖이면 여행 기간을 넓힌다.
+ */
+export function putStay(t: Trip, stay: Stay, cost?: { amount: number; currency: string }) {
+  const stays = (t.stays ??= [])
+  const i = stays.findIndex((x) => x.id === stay.id)
+  const s = { ...stay }
+  const linked = s.expenseId ? t.expenses.find((e) => e.id === s.expenseId) : undefined
+  if (cost && cost.amount > 0) {
+    if (linked) Object.assign(linked, { title: s.name, amount: cost.amount, currency: cost.currency, date: s.checkIn })
+    else {
+      const id = uid()
+      t.expenses.push({ id, title: s.name, amount: cost.amount, currency: cost.currency, category: 'stay', payer: t.members[0]?.id ?? '', split: t.members.map((m) => m.id), date: s.checkIn })
+      s.expenseId = id
+    }
+  } else if (cost && linked) {
+    t.expenses = t.expenses.filter((e) => e.id !== linked.id)
+    s.expenseId = undefined
+  }
+  if (i >= 0) stays[i] = s; else stays.push(s)
+  stays.sort((a, b) => a.checkIn.localeCompare(b.checkIn))
+  if (s.checkIn < t.start) t.start = s.checkIn
+  if (s.checkOut > t.end) t.end = s.checkOut
+  syncDays(t)
+}
+
+export function removeStay(t: Trip, id: string) {
+  const s = t.stays?.find((x) => x.id === id)
+  if (!s) return
+  t.stays = t.stays!.filter((x) => x.id !== id)
+  if (s.expenseId) t.expenses = t.expenses.filter((e) => e.id !== s.expenseId)
 }
 
 /** 항공편을 저장하고, 출발·도착일이 여행 기간 밖이면 기간을 넓힌다 */

@@ -1,6 +1,6 @@
 import { tr } from '../i18n'
 import { Reorder, useDragControls } from 'framer-motion'
-import { Camera, Check, Clock, GripVertical, MapPin, Plane, Plus, Route, Sparkles, Trash2 } from 'lucide-react'
+import { BedDouble, Camera, Check, Clock, GripVertical, MapPin, Plane, Plus, Route, Sparkles, Trash2 } from 'lucide-react'
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { CORE_AIRPORTS, airlineOf, airport } from '../data/airports'
 import { CATEGORY, destination } from '../data/destinations'
@@ -9,11 +9,13 @@ import { legOf } from '../lib/legs'
 import { flightMinutes, isComplete, parseFlightText } from '../lib/flight'
 import { localizeResults, searchPlaces, type GeoResult } from '../lib/geocode'
 import { poiToPlace, retime, shortest, suggestions } from '../lib/planner'
-import { arc, distLabel, fmtDur, fromMin, haptic, km, md, toMin, travelLabel, travelMin, uid, weekday, wonShort } from '../lib/util'
+import { arc, dateRange, distLabel, fmtDur, fromMin, haptic, km, md, toMin, travelLabel, travelMin, uid, weekday, wonShort } from '../lib/util'
 import { putFlight, useStore } from '../store'
 import type { Category, Flight, Place, Trip } from '../types'
 import type { MapPoint } from './MapView'
 import PhotoImport from './PhotoImport'
+import StaySheet, { type StayDraft } from './StaySheet'
+import { DEFAULT_IN, DEFAULT_OUT, dayLine, hopFrom, nextStops, nightStay, routeSegments, type Entry, type LL } from '../lib/dayline'
 import { Sheet, toast } from './ui'
 
 const MapView = lazy(() => import('./MapView'))
@@ -30,27 +32,34 @@ export default function PlanTab({ trip }: { trip: Trip }) {
   const [editId, setEditId] = useState<string>()
   const [flight, setFlight] = useState<Flight | 'new'>()
   const [photos, setPhotos] = useState<File[] | null>(null)
+  const [stay, setStay] = useState<StayDraft>()
   const di = Math.min(idx, trip.days.length - 1)
   const day = trip.days[di]
 
-  const arrivals = trip.flights.filter((f) => f.arrDate === day.date && f.depDate !== day.date)
-  const departures = trip.flights.filter((f) => f.depDate === day.date)
-  const early = departures.filter((f) => f.depTime < '14:00')
-  const late = departures.filter((f) => f.depTime >= '14:00')
-  const rows = arrivals.length + departures.length + day.items.length
+  // 숙소 → 장소 → (시각에 맞춘) 항공편·공항 → 숙소 순서의 하루
+  const line = useMemo(() => dayLine(trip, day.date), [trip, day.date])
+  const nexts = useMemo(() => nextStops(line), [line])
+  const shown = line.filter((e) => e.kind !== 'stay-missing').length
+  const only = shown === 1
 
-  const { points, arcs } = useMemo(() => {
-    const points: MapPoint[] = day.items.map((p, i) => ({ lat: p.lat, lng: p.lng, label: String(i + 1), title: p.name }))
+  const { points, arcs, route, picks } = useMemo(() => {
+    const points: MapPoint[] = []
+    const picks: (() => void)[] = []
     const arcs: [number, number][][] = []
-    for (const f of [...arrivals, ...departures]) {
-      const a = airport(f.from), b = airport(f.to)
-      if (!a || !b) continue
-      arcs.push(arc([a.lng, a.lat], [b.lng, b.lat]))
-      for (const ap of [a, b]) if (!points.some((p) => p.label === ap.code)) points.push({ lat: ap.lat, lng: ap.lng, label: ap.code, air: true, title: ap.name })
+    const seen = new Set<string>()
+    for (const e of line) {
+      if (e.kind === 'place') { points.push({ lat: e.place.lat, lng: e.place.lng, label: String(e.index + 1), title: e.place.name }); picks.push(() => setEditId(e.place.id)) }
+      else if ((e.kind === 'stay-start' || e.kind === 'stay-end') && !seen.has(e.stay.id)) {
+        seen.add(e.stay.id)
+        points.push({ lat: e.stay.lat, lng: e.stay.lng, label: '', stay: true, title: e.stay.name }); picks.push(() => setStay(e.stay))
+      } else if (e.kind === 'flight') {
+        const { from: a, to: b } = e
+        if (a && b) arcs.push(arc([a.lng, a.lat], [b.lng, b.lat]))
+        for (const ap of [a, b]) if (ap && !seen.has(ap.code)) { seen.add(ap.code); points.push({ lat: ap.lat, lng: ap.lng, label: ap.code, air: true, title: ap.name }); picks.push(() => setFlight(e.flight)) }
+      }
     }
-    return { points, arcs }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [day, trip.flights])
+    return { points, arcs, route: routeSegments(line), picks }
+  }, [line])
 
   const dayCost = day.items.reduce((s, p) => s + (p.cost ?? 0), 0)
   const dayDist = day.items.slice(1).reduce((s, p, i) => s + km(day.items[i], p), 0)
@@ -67,7 +76,7 @@ export default function PlanTab({ trip }: { trip: Trip }) {
 
       <div className="plan-map">
         <Suspense fallback={null}>
-          <MapView points={points} arcs={arcs} center={leg} onPick={(i) => { const p = day.items[i]; if (p) setEditId(p.id) }} />
+          <MapView points={points} arcs={arcs} route={route} center={leg} onPick={(i) => picks[i]?.()} />
         </Suspense>
       </div>
 
@@ -82,7 +91,7 @@ export default function PlanTab({ trip }: { trip: Trip }) {
         </div>
       </div>
 
-      {rows === 0 ? (
+      {line.length === 0 ? (
         <div className="empty">
           <strong>{tr('{0}에서 보낼 하루가 비어 있습니다', leg.city)}</strong>
           {tr('trj assistant가 이 날 머무는 곳 가까이에서 갈 만한 곳을 골라 드립니다.')}
@@ -92,15 +101,43 @@ export default function PlanTab({ trip }: { trip: Trip }) {
         </div>
       ) : (
         <Reorder.Group as="ol" axis="y" className="tl" values={day.items} onReorder={(next) => mutate(trip.id, (t) => { t.days[di].items = next as Place[] })}>
-          {arrivals.map((f) => <FlightRow key={`a${f.id}`} f={f} arriving only={rows === 1} onOpen={() => setFlight(f)} />)}
-          {early.map((f) => <FlightRow key={f.id} f={f} only={rows === 1} onOpen={() => setFlight(f)} />)}
-          {day.items.map((p, i) => (
-            <PlaceRow key={p.id} p={p} n={i + 1} next={day.items[i + 1]} only={rows === 1}
-              onOpen={() => setEditId(p.id)}
-              onToggle={() => { haptic(); mutate(trip.id, (t) => { const x = t.days[di].items[i]; x.done = !x.done }) }} />
-          ))}
-          {late.map((f) => <FlightRow key={f.id} f={f} only={rows === 1} onOpen={() => setFlight(f)} />)}
+          {line.map((e, i) => {
+            const next = nexts[i]
+            switch (e.kind) {
+              case 'stay-start': case 'stay-end':
+                return <StayRow key={`${e.kind}${e.stay.id}`} e={e} date={day.date} next={next} only={only} onOpen={() => setStay(e.stay)} />
+              case 'flight':
+                return <FlightRow key={`${e.arriving ? 'a' : 'd'}${e.flight.id}`} e={e} next={next} only={only} onOpen={() => setFlight(e.flight)} />
+              case 'place':
+                return (
+                  <PlaceRow key={e.place.id} p={e.place} n={e.index + 1} next={next} only={only}
+                    onOpen={() => setEditId(e.place.id)}
+                    onToggle={() => { haptic(); mutate(trip.id, (t) => { const x = t.days[di].items[e.index]; x.done = !x.done }) }} />
+                )
+              default:
+                return (
+                  <li key="stay-missing" className="tl-item stay-missing">
+                    <div className="tl-time" />
+                    <div className="tl-rail"><span className="tl-node stay ghost"><BedDouble size={15} /></span></div>
+                    <div className="tl-body">
+                      <button className="stay-add" onClick={() => setStay({ checkIn: day.date })}>
+                        <b><Plus size={16} />{tr('오늘 밤 묵을 숙소 정하기')}</b>
+                        <small>{tr('넣으면 체크인·체크아웃과 숙소로 돌아오는 길이 일정 위아래에 붙습니다')}</small>
+                      </button>
+                    </div>
+                  </li>
+                )
+            }
+          })}
         </Reorder.Group>
+      )}
+      {line.length > 0 && day.items.length === 0 && (
+        <div className="empty slim">
+          {tr('{0}에서 갈 곳이 아직 없습니다', leg.city)}
+          <div style={{ marginTop: 10 }}>
+            <button className="btn btn-ghost" onClick={() => setAdding('ai-auto')}><Sparkles size={16} />{tr('trj assistant에게 추천받기')}</button>
+          </div>
+        </div>
       )}
 
       <div className="add-row">
@@ -109,7 +146,8 @@ export default function PlanTab({ trip }: { trip: Trip }) {
           <Camera size={18} />{tr('사진으로 추가')}
           <input type="file" accept="image/*,application/pdf" multiple hidden onChange={(e) => { const f = [...(e.target.files ?? [])]; e.target.value = ''; if (f.length) setPhotos(f) }} />
         </label>
-        <button className="btn btn-ghost" onClick={() => setFlight('new')} aria-label={tr('항공편 추가')}><Plane size={18} /><span className="wide-only">{tr('항공편')}</span></button>
+        <button className="btn btn-ghost sq" onClick={() => setStay(nightStay(trip, day.date) ?? { checkIn: day.date < trip.end ? day.date : trip.days[Math.max(0, di - 1)].date })} aria-label={tr('숙소')}><BedDouble size={18} /><span className="wide-only">{tr('숙소')}</span></button>
+        <button className="btn btn-ghost sq" onClick={() => setFlight('new')} aria-label={tr('항공편 추가')}><Plane size={18} /><span className="wide-only">{tr('항공편')}</span></button>
       </div>
       {day.items.length > 1 && (
         <div className="tools">
@@ -119,15 +157,17 @@ export default function PlanTab({ trip }: { trip: Trip }) {
       )}
 
       <AddPlaceSheet open={adding !== false} initial={adding || 'search'} onClose={() => setAdding(false)} trip={trip} di={di} />
-      <EditPlaceSheet trip={trip} di={di} id={editId} onClose={() => setEditId(undefined)} />
+      <EditPlaceSheet trip={trip} di={di} id={editId} onClose={() => setEditId(undefined)}
+        onMakeStay={(p) => { setEditId(undefined); setStay({ checkIn: day.date < trip.end ? day.date : trip.days[Math.max(0, di - 1)].date, name: p.name, lat: p.lat, lng: p.lng }) }} />
       <FlightSheet trip={trip} flight={flight} onClose={() => setFlight(undefined)} />
+      <StaySheet trip={trip} stay={stay} onClose={() => setStay(undefined)} />
       <PhotoImport trip={trip} files={photos} current={day.date} onClose={() => setPhotos(null)}
         onGo={(date) => { const i = trip.days.findIndex((d) => d.date === date); if (i >= 0) setIdx(i) }} />
     </>
   )
 }
 
-function PlaceRow({ p, n, next, only, onOpen, onToggle }: { p: Place; n: number; next?: Place; only: boolean; onOpen: () => void; onToggle: () => void }) {
+function PlaceRow({ p, n, next, only, onOpen, onToggle }: { p: Place; n: number; next?: LL; only: boolean; onOpen: () => void; onToggle: () => void }) {
   const controls = useDragControls()
   const c = CATEGORY[p.category]
   return (
@@ -152,19 +192,28 @@ function PlaceRow({ p, n, next, only, onOpen, onToggle }: { p: Place; n: number;
           </button>
           <div className="grip" onPointerDown={(e) => controls.start(e)} aria-hidden="true"><GripVertical size={18} /></div>
         </div>
-        {next ? <div className="hop">{travelLabel(km(p, next))} · {distLabel(km(p, next))}</div> : <div style={{ height: 10 }} />}
+        <Hop from={p} to={next} />
       </div>
     </Reorder.Item>
   )
 }
 
-function FlightRow({ f, arriving, only, onOpen }: { f: Flight; arriving?: boolean; only: boolean; onOpen: () => void }) {
+function Hop({ from, to }: { from?: LL; to?: LL }) {
+  return from && to ? <div className="hop">{travelLabel(km(from, to))} · {distLabel(km(from, to))}</div> : <div style={{ height: 10 }} />
+}
+
+/** 항공편: 그 날 시각에 맞춰 장소 사이에 들어가고, 공항이 동선의 한 지점이 된다 */
+function FlightRow({ e, next, only, onOpen }: { e: Extract<Entry, { kind: 'flight' }>; next?: LL; only: boolean; onOpen: () => void }) {
+  const f = e.flight
+  const arriving = e.arriving
   const mins = flightMinutes(f)
+  const ap = arriving ? e.to : e.from
   return (
     <li className={`tl-item air${only ? ' only' : ''}`}>
-      <div className="tl-time">{arriving ? f.arrTime : f.depTime}</div>
+      <div className="tl-time">{e.time}</div>
       <div className="tl-rail"><span className="tl-node air"><Plane size={15} /></span></div>
       <div className="tl-body">
+        <p className="air-where">{arriving ? tr('{0} 도착', ap?.name ?? f.to) : tr('{0}에서 출발', ap?.name ?? f.from)}</p>
         <button className="pass" onClick={onOpen} aria-label={tr('{0} 항공편 수정', f.flightNo)}>
           <div className="pass-route">
             <div><div className="code">{f.from}</div><div className="at">{f.depTime}</div></div>
@@ -182,7 +231,35 @@ function FlightRow({ f, arriving, only, onOpen }: { f: Flight; arriving?: boolea
             {f.pnr && <span>{tr('예약')}{' '}<b>{f.pnr}</b></span>}
           </div>
         </button>
-        <div style={{ height: 14 }} />
+        <Hop from={hopFrom(e)} to={next} />
+      </div>
+    </li>
+  )
+}
+
+/** 숙소: 그 날 아침에 나서는 곳(위)과 밤에 돌아오는 곳(아래) */
+function StayRow({ e, date, next, only, onOpen }: { e: Extract<Entry, { kind: 'stay-start' | 'stay-end' }>; date: string; next?: LL; only: boolean; onOpen: () => void }) {
+  const s = e.stay
+  const start = e.kind === 'stay-start'
+  const total = dateRange(s.checkIn, s.checkOut).length - 1
+  /** 이 숙소에서 맞는 몇 번째 아침인가 */
+  const morning = dateRange(s.checkIn, date).length - 1
+  const title = start ? (e.checkout ? tr('체크아웃') : tr('숙소에서 출발')) : e.checkin ? tr('체크인 · {0}박', total) : tr('숙소로 돌아오기')
+  const sub = start
+    ? e.checkout ? tr('{0}까지 방을 비우세요. 짐은 프런트에 맡길 수 있는지 물어보세요', s.outTime ?? DEFAULT_OUT) : tr('{0}박 중 {1}번째 아침 · {2} 체크아웃', total, morning, md(s.checkOut))
+    : e.checkin ? tr('{0}부터 · {1} 체크아웃', s.inTime ?? DEFAULT_IN, md(s.checkOut)) : tr('{0} 체크아웃', md(s.checkOut))
+  return (
+    <li className={`tl-item stay ${start ? 'top' : 'bottom'}${only ? ' only' : ''}`}>
+      {/* 시각은 줄 왼쪽이 아니라 카드 안에 쓴다: 위아래에 고정되는 칸이라 장소 시각 순서와 섞이지 않게 */}
+      <div className="tl-time" />
+      <div className="tl-rail"><span className="tl-node stay"><BedDouble size={15} /></span></div>
+      <div className="tl-body">
+        <button className="stay-card" onClick={onOpen} aria-label={tr('{0} 숙소 수정', s.name)}>
+          <span className="stay-kind">{title}</span>
+          <b>{s.name}</b>
+          <small>{sub}{s.code ? ` · ${tr('예약')} ${s.code}` : ''}</small>
+        </button>
+        {start ? <Hop from={s} to={next} /> : <div style={{ height: 14 }} />}
       </div>
     </li>
   )
@@ -314,7 +391,7 @@ function AddPlaceSheet({ open, initial, onClose, trip, di }: { open: boolean; in
 }
 
 /* ── 장소 수정 ── */
-function EditPlaceSheet({ trip, di, id, onClose }: { trip: Trip; di: number; id?: string; onClose: () => void }) {
+function EditPlaceSheet({ trip, di, id, onClose, onMakeStay }: { trip: Trip; di: number; id?: string; onClose: () => void; onMakeStay: (p: Place) => void }) {
   const mutate = useStore((s) => s.mutate)
   const source = trip.days[di]?.items.find((p) => p.id === id)
   const [d, setD] = useState<Place>()
@@ -352,6 +429,12 @@ function EditPlaceSheet({ trip, di, id, onClose }: { trip: Trip; di: number; id?
           <div className="field"><span>{tr('종류')}</span>
             <div className="chips">{CATS.map((c) => <button key={c} className="chip" aria-pressed={d.category === c} onClick={() => set({ category: c })}>{CATEGORY[c].label}</button>)}</div>
           </div>
+          {d.category === 'stay' && (
+            <button className="stay-add" onClick={() => { mutate(trip.id, (t) => { t.days[di].items = t.days[di].items.filter((p) => p.id !== d.id) }); onMakeStay(d) }}>
+              <b><BedDouble size={16} />{tr('숙소로 등록하기')}</b>
+              <small>{tr('체크인·체크아웃 날짜를 정하면 묵는 날마다 일정 위아래에 붙습니다')}</small>
+            </button>
+          )}
           <div className="row">
             <label className="field"><span>{tr('1인 예상 비용(원)')}</span><input type="number" inputMode="numeric" min={0} step={1000} value={d.cost ?? ''} onChange={(e) => set({ cost: e.target.value ? Number(e.target.value) : undefined })} /></label>
             <label className="field"><span>{tr('날짜')}</span>

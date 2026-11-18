@@ -1,12 +1,13 @@
 import { tr } from '../i18n'
-import type { Expense, Flight, Place, Trip } from '../types'
+import type { Expense, Flight, Place, Stay, Trip } from '../types'
 import { loadWorldAirports } from '../data/airports'
 import { reverseGeocode, searchPlaces } from './geocode'
 import { legOf } from './legs'
 import { ocrPasses, recognizeLines } from './ocr'
 import { readExif } from './photos'
 import { readText } from './receipt'
-import { fromMin, km, toMin, travelMin, uid } from './util'
+import { putStay, removeStay } from '../store'
+import { addDays, fromMin, km, toMin, travelMin, uid } from './util'
 
 /**
  * "사진으로 추가": 영수증·예약 화면·탑승권·장소 사진을 기기 안에서 읽어 일정과 예산에 넣는다 (AI를 쓰지 않는다).
@@ -24,6 +25,8 @@ export interface Draft {
   place?: Place
   expense?: Omit<Expense, 'payer' | 'split'>
   flight?: Flight
+  /** 숙소 예약이면 숙소로 넣는다 (체크인·체크아웃이 일정 위아래에 붙는다) */
+  stay?: Stay
   /** 위치를 찾지 못해 일정에는 넣지 않은 경우 */
   noPlace?: boolean
 }
@@ -91,6 +94,17 @@ export async function readTripPhoto(file: File, trip: Trip, current: string, onS
   }
   const title = name ?? (r.costOnly ? tr('교통비') : tr('사진 속 결제'))
   const expense = money ? { id: uid(), title: money.extra ? `${title} (${money.extra})` : title, amount: money.amount, currency: money.currency, category: r.expenseCategory, date } : undefined
+  if (r.category === 'stay' && name && r.stay?.checkIn) {
+    // 숙소: 위치를 못 찾았으면 그 도시 가운데로 두고 이름으로 고칠 수 있게 한다
+    const loc = where ?? { lat: near.lat, lng: near.lng }
+    const checkIn = r.stay.checkIn
+    const checkOut = r.stay.checkOut && r.stay.checkOut > checkIn ? r.stay.checkOut : addDays(checkIn, 1)
+    out.push({
+      date: checkIn, dateFrom: 'image', expense: expense && { ...expense, category: 'stay', date: checkIn },
+      stay: { id: uid(), name, ...loc, checkIn, checkOut, inTime: r.stay.inTime, outTime: r.stay.outTime, code: r.code },
+    })
+    return out
+  }
   if (where && name) {
     out.push({
       date, dateFrom: from, expense,
@@ -112,6 +126,9 @@ export interface Applied {
   amount?: { value: number; currency: string }
   time?: string
   noPlace?: boolean
+  stayId?: string
+  stayAdded?: boolean
+  checkOut?: string
   /** 이미 넣은 것과 같아 다시 넣지 않았다 */
   duplicate?: boolean
 }
@@ -124,6 +141,21 @@ export function applyDraft(t: Trip, d: Draft, putFlight: (t: Trip, f: Flight) =>
     if (same) res.duplicate = true
     else { putFlight(t, d.flight); res.flightId = d.flight.id }
     res.time = d.flight.depTime
+  }
+  if (d.stay) {
+    const same = (t.stays ?? []).find((s) => s.name === d.stay!.name && s.checkIn === d.stay!.checkIn)
+    if (same) { res.duplicate = true; res.stayId = same.id }
+    else {
+      // 숙박비는 숙소에 묶어 둔다 (숙소를 지우면 함께 지워진다)
+      putStay(t, { ...d.stay }, d.expense ? { amount: d.expense.amount, currency: d.expense.currency } : undefined)
+      res.stayId = d.stay.id
+      res.stayAdded = true
+    }
+    const s = t.stays!.find((x) => x.id === res.stayId)!
+    res.title = s.name
+    res.checkOut = s.checkOut
+    if (d.expense) res.amount = { value: d.expense.amount, currency: d.expense.currency }
+    return res
   }
   const day = t.days.find((x) => x.date === d.date)
   if (d.place && day) {
@@ -157,6 +189,7 @@ export function applyDraft(t: Trip, d: Draft, putFlight: (t: Trip, f: Flight) =>
 
 /** 넣은 것을 되돌린다 */
 export function undoApplied(t: Trip, a: Applied) {
+  if (a.stayId && a.stayAdded) removeStay(t, a.stayId)
   if (a.placeId && a.placeAdded) for (const d of t.days) d.items = d.items.filter((p) => p.id !== a.placeId)
   if (a.expenseId) t.expenses = t.expenses.filter((e) => e.id !== a.expenseId)
   if (a.flightId) t.flights = t.flights.filter((f) => f.id !== a.flightId)

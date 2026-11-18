@@ -23,6 +23,26 @@ export interface Reading {
   /** 들를 곳 없이 비용만 있는 것 (택시, 교통카드 등) */
   costOnly: boolean
   flights: Flight[]
+  /** 숙소 예약 화면이면 체크인·체크아웃 */
+  stay?: { checkIn?: string; checkOut?: string; inTime?: string; outTime?: string }
+}
+
+/** 숙소 예약의 체크인·체크아웃 날짜와 시각 */
+export function findStayDates(text: string, days: string[]): Reading['stay'] {
+  const year = Number((days[0] ?? '').slice(0, 4)) || new Date().getFullYear()
+  const lines = text.split('\n')
+  const IN = /체크\s*인|check[\s-]*in|入住|チェックイン|เช็คอิน/i, OUT = /체크\s*아웃|check[\s-]*out|退房|チェックアウト|เช็คเอาท์/i
+  const pick = (re: RegExp) => {
+    const i = lines.findIndex((l) => re.test(l) && findDates(l, year).length)
+    // 날짜가 항목 다음 줄에 있는 화면도 있다
+    const at = i >= 0 ? i : lines.findIndex((l, k) => re.test(l) && k + 1 < lines.length && findDates(lines[k + 1], year).length)
+    if (at < 0) return {}
+    const l = i >= 0 ? lines[at] : `${lines[at]} ${lines[at + 1]}`
+    return { date: findDates(l, year)[0], time: findTime(l.replace(/\d{4}[-./년]\s*\d{1,2}[-./월]\s*\d{1,2}/g, ' ')) }
+  }
+  const a = pick(IN), b = pick(OUT)
+  if (!a.date && !b.date) return undefined
+  return { checkIn: a.date, checkOut: b.date, inTime: a.time, outTime: b.time }
 }
 
 const MONTHS: Record<string, number> = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, sept: 9, oct: 10, nov: 11, dec: 12 }
@@ -265,5 +285,6 @@ export function readText(lines: OcrLine[], days: string[], tripCurrency: string)
     expenseCategory: kind?.exp ?? (amount ? 'etc' : 'play'),
     costOnly: Boolean(kind?.costOnly),
     flights,
+    stay: kind?.cat === 'stay' ? findStayDates(text, days) : undefined,
   }
 }

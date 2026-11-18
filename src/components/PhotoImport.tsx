@@ -1,5 +1,5 @@
 import { tr } from '../i18n'
-import { CalendarCheck, Loader2, Plane, Receipt, Undo2 } from 'lucide-react'
+import { BedDouble, CalendarCheck, Loader2, Plane, Receipt, Undo2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { applyDraft, dateFromLabel, readTripPhoto, undoApplied, type Applied } from '../lib/photoImport'
 import { md, won } from '../lib/util'
@@ -72,22 +72,22 @@ export default function PhotoImport({ trip, files, current, onClose, onGo }: { t
               {j.results.map((r, k) => (
                 <div className={`import-row${r.undone ? ' undone' : ''}`} key={k}>
                   <span className="grow">
-                    <b>{r.flightId ? <Plane size={14} /> : r.noPlace ? <Receipt size={14} /> : null} {r.title}</b>
+                    <b>{r.flightId ? <Plane size={14} /> : r.stayId ? <BedDouble size={14} /> : r.noPlace ? <Receipt size={14} /> : null} {r.title}</b>
                     <small>
                       {[
-                        r.flightId ? tr('항공편') : tr('{0}일차', dayNo(r.date)),
-                        md(r.date), r.time,
+                        r.flightId ? tr('항공편') : r.stayId ? tr('숙소') : tr('{0}일차', dayNo(r.date)),
+                        r.stayId && r.checkOut ? tr('{0} 체크인 → {1} 체크아웃', md(r.date), md(r.checkOut)) : md(r.date), r.time,
                         r.amount && (r.expenseId ? tr('{0} 예산에 기록', money(r.amount)) : money(r.amount)),
                       ].filter(Boolean).join(' · ')}
                     </small>
-                    {!r.undone && r.date !== current && !r.flightId && dayNo(r.date) > 0 && (
+                    {!r.undone && r.date !== current && !r.flightId && !r.stayId && dayNo(r.date) > 0 && (
                       <small className="moved"><CalendarCheck size={13} />{tr('{0}에 맞춰 {1}일차에 넣었습니다', dateFromLabel(r.dateFrom), dayNo(r.date))}</small>
                     )}
                     {r.noPlace && <small className="mute">{tr('위치를 찾지 못해 예산에만 기록했습니다')}</small>}
                     {r.duplicate && <small className="mute">{tr('이미 들어 있어 다시 넣지 않았습니다')}</small>}
                     {r.undone && <small className="mute">{tr('뺐습니다')}</small>}
                   </span>
-                  {!r.undone && !(r.duplicate && !r.expenseId && !r.placeAdded) && (
+                  {!r.undone && !(r.duplicate && !r.expenseId && !r.placeAdded && !r.stayAdded) && (
                     <button className="icon-btn" aria-label={tr('{0} 빼기', r.title)} onClick={() => undo(j.id, k)}><Undo2 size={18} /></button>
                   )}
                 </div>

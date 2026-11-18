@@ -260,6 +260,7 @@ button { cursor: pointer; border: 0; background: none; padding: 0; }
   font-family: var(--num); font-weight: 800; font-size: 13px; border: 2.5px solid var(--linen); box-shadow: 0 3px 8px rgba(28, 44, 41, 0.35); cursor: pointer;
 }
 .pin.air { background: var(--forest); color: var(--sand); font-size: 11px; width: auto; padding: 0 7px; border-radius: 14px; }
+.pin.stay { background: var(--sand); color: var(--forest); border-radius: 9px; }
 .maplibregl-ctrl-attrib { font-size: 10px; }
 
 .day-head { display: flex; align-items: flex-end; justify-content: space-between; padding: 22px 20px 6px; }
@@ -312,7 +313,7 @@ button { cursor: pointer; border: 0; background: none; padding: 0; }
 .add-row { display: flex; gap: 8px; padding: 14px 20px 0; }
 .add-row .btn { flex: 1; height: 46px; font-size: 14.5px; padding: 0 10px; }
 .add-row label.btn { cursor: pointer; }
-.add-row .btn:last-child { flex: none; min-width: 46px; }
+.add-row .btn.sq { flex: none; min-width: 46px; padding: 0 12px; }
 .wide-only { display: none; }
 @media (min-width: 600px) { .wide-only { display: inline; } }
 .imports { display: grid; gap: 10px; margin-bottom: 12px; }
@@ -450,3 +451,30 @@ button { cursor: pointer; border: 0; background: none; padding: 0; }
   .route-line { stroke-dashoffset: 0; }
 }
 ::view-transition-old(root), ::view-transition-new(root) { animation-duration: 0.22s; }
+
+/* ── 숙소: 아침에 나서는 곳(위)과 밤에 돌아오는 곳(아래) ── */
+.tl-node.stay { background: var(--sand); color: var(--forest); border-radius: 10px; }
+.tl-node.stay.ghost { background: transparent; color: var(--mute); border: 1.5px dashed var(--line); }
+.tl-item.stay.top .tl-rail::before { background: linear-gradient(var(--sand), var(--accent)); }
+.tl-item.stay.bottom .tl-rail::before { background: linear-gradient(var(--accent), var(--sand)); }
+.stay-card {
+  display: grid; gap: 2px; width: 100%; text-align: left; padding: 12px 14px; border-radius: var(--r-m);
+  background: linear-gradient(135deg, #efe4d4, #e6d6c0); color: var(--forest); position: relative; overflow: hidden;
+}
+.stay-card::after { content: ''; position: absolute; right: -18px; top: -18px; width: 70px; height: 70px; border-radius: 50%; border: 10px solid rgba(255, 255, 255, 0.28); }
+.stay-kind { font-size: 12px; font-weight: 700; color: var(--sand-ink); }
+.stay-card b { font-size: 15.5px; font-weight: 700; letter-spacing: -0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stay-card small { font-size: 12.5px; color: rgba(28, 44, 41, 0.72); }
+.stay-add { display: grid; gap: 3px; width: 100%; text-align: left; padding: 12px 14px; border-radius: var(--r-m); border: 1.5px dashed var(--line); color: var(--ink); }
+.stay-add b { display: flex; align-items: center; gap: 6px; font-size: 14.5px; }
+.stay-add small { font-size: 12.5px; color: var(--mute); }
+.tl-item.stay-missing .tl-rail::before { background: repeating-linear-gradient(var(--line) 0 4px, transparent 4px 8px); }
+.air-where { font-size: 12.5px; font-weight: 650; color: var(--sand-ink); margin: 14px 0 6px; }
+.empty.slim { padding: 14px 24px 4px; font-size: 14px; }
+.stay-summary { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: var(--r-s); background: linear-gradient(135deg, #efe4d4, #e6d6c0); color: var(--forest); }
+.stay-summary b { display: block; font-size: 16px; }
+.stay-summary small { font-size: 12.5px; color: rgba(28, 44, 41, 0.72); }
+.stay-results button { display: flex; align-items: center; gap: 10px; }
+.stay-results small { display: block; }
+.input-btn { display: flex; align-items: center; gap: 6px; }
+.input-btn input { flex: 1; min-width: 0; }

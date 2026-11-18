@@ -192,4 +192,5 @@ export const CATEGORY: Record<Category, { label: string; color: string }> = {
   culture: { label: tr('문화'), color: '#5E5A86' },
   night: { label: tr('밤'), color: '#3E4A5C' },
   stay: { label: tr('숙소'), color: '#7A8580' },
+  move: { label: tr('교통'), color: '#3E6B8A' },
 }

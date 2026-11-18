@@ -23,6 +23,7 @@ export function stamp(prev: Trip, next: Trip, now = Date.now()) {
     for (const x of a) if (!kept.has(x.id)) del[x.id] = now
   }
   track(prev.flights, next.flights)
+  track(prev.stays ?? [], next.stays ?? [])
   track(prev.members, next.members)
   track(prev.expenses, next.expenses)
   track(prev.checklist, next.checklist)
@@ -57,7 +58,7 @@ function content(t: Trip) {
   const s = shared(t)
   return JSON.stringify({
     meta: META.map((k) => s[k]), days: s.days.map((d) => [d.date, d.items]),
-    flights: byId(s.flights), members: byId(s.members), expenses: byId(s.expenses), checklist: byId(s.checklist),
+    flights: byId(s.flights), stays: byId(s.stays ?? []), members: byId(s.members), expenses: byId(s.expenses), checklist: byId(s.checklist),
     journal: Object.entries(s.journal).filter(([, v]) => v.text || v.photos.length).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => [k, v.text, v.photos]),
   })
 }
@@ -85,6 +86,8 @@ export function mergeTrips(local: Trip, remote: Trip): Trip {
   for (const k of META) (out as unknown as Record<string, unknown>)[k] = meta[k]
   out.metaU = meta.metaU
   out.flights = list(local.flights, remote.flights).sort((a, b) => `${a.depDate}${a.depTime}`.localeCompare(`${b.depDate}${b.depTime}`))
+  const stays = list(local.stays ?? [], remote.stays ?? []).sort((a, b) => `${a.checkIn}${a.id}`.localeCompare(`${b.checkIn}${b.id}`))
+  if (stays.length || local.stays || remote.stays) out.stays = stays
   out.members = list(local.members, remote.members)
   out.expenses = list(local.expenses, remote.expenses)
   out.checklist = list(local.checklist, remote.checklist)

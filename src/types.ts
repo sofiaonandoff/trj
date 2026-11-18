@@ -1,4 +1,4 @@
-export type Category = 'sight' | 'food' | 'cafe' | 'shop' | 'nature' | 'culture' | 'night' | 'stay'
+export type Category = 'sight' | 'food' | 'cafe' | 'shop' | 'nature' | 'culture' | 'night' | 'stay' | 'move'
 
 export interface Place {
   /** 마지막으로 고친 시각(ms). 기기 간 병합에 쓴다 */
@@ -35,6 +35,28 @@ export interface Flight {
   arrTime: string
   seat?: string
   pnr?: string
+}
+
+/** 숙소. 체크인 날 밤부터 체크아웃 날 아침까지 그 날 일정의 시작·끝이 된다 */
+export interface Stay {
+  /** 마지막으로 고친 시각(ms). 기기 간 병합에 쓴다 */
+  u?: number
+  id: string
+  name: string
+  lat: number
+  lng: number
+  /** 체크인 날짜와 시각 (기본 15:00) */
+  checkIn: string
+  inTime?: string
+  /** 체크아웃 날짜와 시각 (기본 11:00) */
+  checkOut: string
+  outTime?: string
+  address?: string
+  /** 예약번호 */
+  code?: string
+  note?: string
+  /** 숙박비를 예산에 남겼으면 그 지출 id */
+  expenseId?: string
 }
 
 export interface Member {
@@ -106,6 +128,8 @@ export interface Trip {
   end: string
   days: Day[]
   flights: Flight[]
+  /** 숙소 (예전에 만든 여행에는 없을 수 있다) */
+  stays?: Stay[]
   members: Member[]
   expenses: Expense[]
   checklist: CheckItem[]
