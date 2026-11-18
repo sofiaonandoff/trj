@@ -140,6 +140,10 @@ export interface Trip {
   rate: number // 현지 통화 1단위 = 원
   /** 여행지 통화가 아닌 다른 통화로 쓴 지출의 환율 (1단위 = 원). 없으면 기본 어림 환율 */
   rates?: Record<string, number>
+  /** 합계·예산·정산을 보여 줄 기준 화폐 (없으면 원화). 예산(budget)은 이 화폐 금액이다 */
+  base?: string
+  /** 사용자가 직접 고친 환율의 화폐들 (나머지는 어림값) */
+  ratesEdited?: string[]
   budget: number // 원
   createdAt: number
   /** 여행 내용이 마지막으로 바뀐 시각 */

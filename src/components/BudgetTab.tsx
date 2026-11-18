@@ -2,7 +2,9 @@ import { tr } from '../i18n'
 import { ArrowRight, Plus, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { md, today, uid, won } from '../lib/util'
-import { CURRENCIES, rateOf, toWon as wonOf, unit } from '../data/currencies'
+import { CURRENCIES, baseOf, customRate, krwToBase, money, rateInBase, rateOf, resetRate, setBase, setRateInBase, toWon as wonOf, unit } from '../data/currencies'
+import CurrencySelect from './CurrencySelect'
+import { RotateCcw } from 'lucide-react'
 import { useStore } from '../store'
 import type { Expense, ExpenseCategory, Trip } from '../types'
 import { Avatar, Sheet, toast } from './ui'
@@ -46,11 +48,14 @@ export default function BudgetTab({ trip, readOnly = false }: { trip: Trip; read
   const byCat = CATS.map((c) => ({ c, v: trip.expenses.filter((e) => e.category === c).reduce((s, e) => s + toWon(e), 0) })).filter((x) => x.v > 0)
   const transfers = settle(trip, toWon)
   const name = (id: string) => trip.members.find((m) => m.id === id)
-  const over = trip.budget > 0 && total > trip.budget
-  const foreign = trip.currency !== 'KRW'
-  // 여행지 통화·원화가 아닌 통화로 쓴 지출이 있으면 그 통화의 환율도 고칠 수 있게 보여 준다
-  const others = [...new Set(trip.expenses.map((e) => e.currency))].filter((c) => c !== 'KRW' && c !== trip.currency)
-  // 결제한 사람별: 낸 돈과 자기 몫 (원화 환산)
+  const base = baseOf(trip)
+  /** 원화로 계산한 금액을 기준 화폐로 보여 준다 */
+  const M = (krw: number) => money(krwToBase(trip, krw), base)
+  const budgetKrw = trip.budget * rateOf(trip, base)
+  const over = trip.budget > 0 && total > budgetKrw
+  // 환율을 보여 줄 화폐: 여행지 화폐와 지출에 쓴 화폐 (기준 화폐는 빼고)
+  const used = [...new Set([trip.currency, ...trip.expenses.map((e) => e.currency)])].filter((c) => c !== base)
+  // 결제한 사람별: 낸 돈과 자기 몫
   const byPayer = trip.members.map((m) => ({
     m,
     paid: trip.expenses.filter((e) => e.payer === m.id).reduce((s, e) => s + toWon(e), 0),
@@ -58,38 +63,59 @@ export default function BudgetTab({ trip, readOnly = false }: { trip: Trip; read
     share: trip.expenses.reduce((s, e) => (e.split.includes(m.id) ? s + toWon(e) / e.split.length : s), 0),
     byCur: Object.entries(trip.expenses.filter((e) => e.payer === m.id).reduce<Record<string, number>>((a, e) => { a[e.currency] = (a[e.currency] ?? 0) + e.amount; return a }, {})),
   }))
+  const totalBase = krwToBase(trip, total)
 
   return (
     <>
       <section className="panel">
         <div className="between">
           <h2 style={{ margin: 0 }}>{tr('지금까지 쓴 돈')}</h2>
-          <span className="mute" style={{ fontSize: 13 }}>{tr('1인 {0}', won(total / trip.members.length))}</span>
+          <span className="mute" style={{ fontSize: 13 }}>{tr('1인 {0}', M(total / trip.members.length))}</span>
         </div>
-        <div className="big" style={{ marginTop: 10, color: over ? 'var(--warn)' : undefined }}>{Math.round(total).toLocaleString('ko-KR')}<small>{tr('원')}</small></div>
+        <div className="big" style={{ marginTop: 10, color: over ? 'var(--warn)' : undefined }}>
+          {totalBase.toLocaleString('ko-KR', { maximumFractionDigits: base === 'KRW' || totalBase >= 1000 ? 0 : 2 })}<small>{base === 'KRW' ? unit(base) : ` ${base}`}</small>
+        </div>
         <div className="meter" role="img" aria-label={tr('항목별 지출 비율')}>
-          {byCat.map(({ c, v }) => <i key={c} style={{ width: `${(v / Math.max(total, trip.budget || 0)) * 100}%`, background: CAT[c].color }} />)}
+          {byCat.map(({ c, v }) => <i key={c} style={{ width: `${(v / Math.max(total, budgetKrw || 0)) * 100}%`, background: CAT[c].color }} />)}
         </div>
-        <div className="legend">{byCat.map(({ c, v }) => <span key={c}><i className="dot" style={{ background: CAT[c].color }} />{CAT[c].label} {won(v)}</span>)}</div>
+        <div className="legend">{byCat.map(({ c, v }) => <span key={c}><i className="dot" style={{ background: CAT[c].color }} />{CAT[c].label} {M(v)}</span>)}</div>
         {readOnly ? (
-          <p className="hint">{trip.budget > 0 ? tr('전체 예산 {0}', won(trip.budget)) : null}{foreign && trip.rate ? `${trip.budget > 0 ? ' · ' : ''}${tr('환율 (1 {0} = 원)', trip.currency)} ${trip.rate}` : null}</p>
+          trip.budget > 0 && <p className="hint">{tr('전체 예산 {0}', money(trip.budget, base))}</p>
         ) : <div className="row" style={{ marginTop: 16 }}>
-          <label className="field"><span>{tr('전체 예산(원)')}</span>
-            <input type="number" inputMode="numeric" min={0} step={10000} value={trip.budget || ''} placeholder={tr('정하지 않음')} onChange={(e) => mutate(trip.id, (t) => { t.budget = Number(e.target.value) || 0 })} /></label>
-          {foreign && <label className="field"><span>{tr('환율 (1 {0} = 원)', trip.currency)}</span>
-            <input type="number" inputMode="decimal" min={0} step="any" value={trip.rate} onChange={(e) => mutate(trip.id, (t) => { t.rate = Number(e.target.value) || 0 })} /></label>}
+          <label className="field"><span>{tr('전체 예산 ({0})', unit(base))}</span>
+            <input type="number" inputMode="decimal" min={0} step="any" value={trip.budget || ''} placeholder={tr('정하지 않음')} onChange={(e) => mutate(trip.id, (t) => { t.budget = Number(e.target.value) || 0 })} /></label>
+          <CurrencySelect trip={trip} value={base} label={tr('기준 화폐')} onChange={(c) => mutate(trip.id, (t) => setBase(t, c))} />
         </div>}
-        {!readOnly && others.length > 0 && (
-          <div className="row" style={{ marginTop: 10, flexWrap: 'wrap' }}>
-            {others.map((c) => (
-              <label key={c} className="field" style={{ minWidth: 140 }}><span>{tr('환율 (1 {0} = 원)', c)}</span>
-                <input type="number" inputMode="decimal" min={0} step="any" value={rateOf(trip, c)} onChange={(e) => mutate(trip.id, (t) => { t.rates = { ...t.rates, [c]: Number(e.target.value) || 0 } })} /></label>
-            ))}
-          </div>
-        )}
-        {trip.budget > 0 && <p className="hint">{over ? tr('예산을 {0} 넘었습니다', won(total - trip.budget)) : tr('예산이 {0} 남았습니다', won(trip.budget - total))}</p>}
-        {(foreign || others.length > 0) && !readOnly && <p className="hint">{tr('환율은 어림값으로 들어가 있습니다. 실제 환전·결제 환율로 고쳐 쓰세요.')}</p>}
+        {trip.budget > 0 && <p className="hint">{over ? tr('예산을 {0} 넘었습니다', M(total - budgetKrw)) : tr('예산이 {0} 남았습니다', M(budgetKrw - total))}</p>}
       </section>
+
+      {used.length > 0 && (
+        <section className="panel">
+          <div className="between"><h2 style={{ margin: 0 }}>{tr('환율')}</h2>{readOnly && <span className="mute" style={{ fontSize: 13 }}>{tr('기준 화폐 {0}', base)}</span>}</div>
+          <div className="rates">
+            {used.map((c) => {
+              const { per, value } = rateInBase(trip, c)
+              const mine = customRate(trip, c)
+              return (
+                <div className="rate-row" key={c}>
+                  <span className="rate-from">{per.toLocaleString('ko-KR')} {c} =</span>
+                  {readOnly ? <b className="num">{+value.toPrecision(4)} {base}</b> : <>
+                    <input className="input" type="number" inputMode="decimal" min={0} step="any" aria-label={tr('{0} 환율', c)}
+                      defaultValue={+value.toPrecision(4)} key={`${c}${base}${value.toPrecision(6)}`}
+                      onBlur={(e) => { const v = Number(e.target.value); if (v > 0 && Math.abs(v - value) / value > 1e-6) mutate(trip.id, (t) => setRateInBase(t, c, per, v)) }}
+                      onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} />
+                    <span className="rate-to">{base}</span>
+                    {mine
+                      ? <button className="icon-btn" aria-label={tr('{0} 환율을 기본값으로', c)} title={tr('기본값으로')} onClick={() => mutate(trip.id, (t) => resetRate(t, c))}><RotateCcw size={16} /></button>
+                      : <span className="rate-tag">{tr('어림값')}</span>}
+                  </>}
+                </div>
+              )
+            })}
+          </div>
+          {!readOnly && <p className="hint">{tr('처음 환율은 어림값입니다. 실제 환전·카드 결제 환율을 직접 넣으면 모든 합계와 정산이 그 환율로 다시 계산됩니다.')}</p>}
+        </section>
+      )}
 
       {trip.members.length > 1 && total > 0 && (
         <section className="panel">
@@ -98,10 +124,10 @@ export default function BudgetTab({ trip, readOnly = false }: { trip: Trip; read
             <div className="payer" key={m.id}>
               <Avatar m={m} />
               <span className="grow"><b>{m.name}</b>
-                <small>{count ? tr('{0}건 결제', count) : tr('결제 없음')}{byCur.some(([c]) => c !== 'KRW') ? ` · ${byCur.map(([c, a]) => `${(Math.round(a * 100) / 100).toLocaleString('ko-KR')} ${unit(c)}`).join(' + ')}` : ''}</small></span>
+                <small>{count ? tr('{0}건 결제', count) : tr('결제 없음')}{byCur.some(([c]) => c !== base) ? ` · ${byCur.map(([c, a]) => `${(Math.round(a * 100) / 100).toLocaleString('ko-KR')} ${unit(c)}`).join(' + ')}` : ''}</small></span>
               <span style={{ textAlign: 'right' }}>
-                <b className="num">{won(paid)}</b>
-                <small>{tr('자기 몫 {0}', won(share))}</small>
+                <b className="num">{M(paid)}</b>
+                <small>{tr('자기 몫 {0}', M(share))}</small>
               </span>
             </div>
           ))}
@@ -116,7 +142,7 @@ export default function BudgetTab({ trip, readOnly = false }: { trip: Trip; read
               {name(t.from) && <Avatar m={name(t.from)!} />}<span>{name(t.from)?.name}</span>
               <ArrowRight size={16} className="mute" />
               {name(t.to) && <Avatar m={name(t.to)!} />}<span>{name(t.to)?.name}</span>
-              <span className="num">{won(t.amount)}</span>
+              <span className="num">{M(t.amount)}</span>
             </div>
           ))}
         </section>
@@ -131,7 +157,7 @@ export default function BudgetTab({ trip, readOnly = false }: { trip: Trip; read
                 <span className="grow"><b>{e.title}</b><small>{tr('{0} · {1} 결제 · {2}명', md(e.date), name(e.payer)?.name ?? '?', e.split.length)}</small></span>
                 <span style={{ textAlign: 'right' }}>
                   <b className="num" style={{ fontSize: 17 }}>{e.amount.toLocaleString('ko-KR')} {unit(e.currency)}</b>
-                  {e.currency !== 'KRW' && <small>{won(toWon(e))}</small>}
+                  {e.currency !== base && <small>{M(toWon(e))}</small>}
                 </span>
               </button>
             ))}
@@ -189,7 +215,7 @@ function ExpenseSheet({ trip, edit, onClose }: { trip: Trip; edit?: Expense | 'n
                 {CURRENCIES.filter((c) => !quick.includes(c.code)).map((c) => <option key={c.code} value={c.code}>{c.code} · {c.name}</option>)}
               </select>
             </div>
-            {d.currency !== 'KRW' && d.amount > 0 && <small className="hint" style={{ marginTop: 6 }}>{tr('약 {0} (1 {1} = {2}원)', won(wonOf(trip, d.amount, d.currency)), d.currency, rateOf(trip, d.currency).toLocaleString('ko-KR'))}</small>}
+            {d.currency !== baseOf(trip) && d.amount > 0 && (() => { const x = rateInBase(trip, d.currency); return <small className="hint" style={{ marginTop: 6 }}>{tr('약 {0} ({1} {2} = {3} {4})', money(krwToBase(trip, wonOf(trip, d.amount, d.currency)), baseOf(trip)), x.per.toLocaleString('ko-KR'), d.currency, +x.value.toPrecision(4), baseOf(trip))}</small> })()}
           </div>
           <div className="field"><span>{tr('항목')}</span>
             <div className="chips">{CATS.map((c) => <button key={c} className="chip" aria-pressed={d.category === c} onClick={() => set({ category: c })}>{CAT[c].label}</button>)}</div>

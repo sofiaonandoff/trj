@@ -2,7 +2,7 @@ import type { Day, JournalEntry, Place, Trip } from '../types'
 import { dateRange } from './util'
 
 /** 여행 기본 정보: 한 묶음으로 나중에 고친 쪽을 따른다 */
-const META = ['title', 'city', 'country', 'destId', 'lat', 'lng', 'start', 'end', 'currency', 'rate', 'rates', 'budget', 'legs'] as const
+const META = ['title', 'city', 'country', 'destId', 'lat', 'lng', 'start', 'end', 'currency', 'rate', 'rates', 'base', 'ratesEdited', 'budget', 'legs'] as const
 const metaSig = (t: Trip) => JSON.stringify(META.map((k) => t[k] ?? null))
 
 type Entity = { id: string; u?: number }

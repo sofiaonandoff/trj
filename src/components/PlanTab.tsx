@@ -12,7 +12,7 @@ import { poiToPlace, retime, shortest, suggestions } from '../lib/planner'
 import { arc, dateRange, distLabel, fmtDur, fromMin, haptic, km, md, toMin, travelLabel, travelMin, uid, weekday, won, wonShort } from '../lib/util'
 import { putFlight, removePlace, syncPlaceCost, useStore } from '../store'
 import CurrencySelect from './CurrencySelect'
-import { toWon, unit } from '../data/currencies'
+import { baseOf, krwToBase, money, moneyShort, toWon, unit } from '../data/currencies'
 import type { Category, Flight, Place, Trip } from '../types'
 import type { MapPoint } from './MapView'
 import PhotoImport from './PhotoImport'
@@ -91,8 +91,8 @@ export default function PlanTab({ trip }: { trip: Trip }) {
           <p>
             {day.items.length ? tr('{0}곳', day.items.length) : tr('아직 장소가 없습니다')}
             {dayDist > 0 && tr(' · 이동 {0}', distLabel(dayDist))}
-            {dayPaid > 0 && tr(' · 예약 비용 {0}', wonShort(dayPaid))}
-            {dayCost > 0 && tr(' · 1인 약 {0}', wonShort(dayCost))}
+            {dayPaid > 0 && tr(' · 예약 비용 {0}', moneyShort(krwToBase(trip, dayPaid), baseOf(trip)))}
+            {dayCost > 0 && tr(' · 1인 약 {0}', moneyShort(krwToBase(trip, dayCost), baseOf(trip)))}
           </p>
         </div>
       </div>
@@ -116,7 +116,7 @@ export default function PlanTab({ trip }: { trip: Trip }) {
                 return <FlightRow key={`${e.arriving ? 'a' : 'd'}${e.flight.id}`} e={e} next={next} only={only} onOpen={() => setFlight(e.flight)} />
               case 'place':
                 return (
-                  <PlaceRow key={e.place.id} p={e.place} n={e.index + 1} next={next} only={only} paid={paidOf(e.place)}
+                  <PlaceRow key={e.place.id} p={e.place} n={e.index + 1} next={next} only={only} paid={paidOf(e.place)} est={e.place.cost ? moneyShort(krwToBase(trip, e.place.cost), baseOf(trip)) : undefined}
                     onOpen={() => setEditId(e.place.id)}
                     onToggle={() => { haptic(); mutate(trip.id, (t) => { const x = t.days[di].items[e.index]; x.done = !x.done }) }} />
                 )
@@ -173,7 +173,7 @@ export default function PlanTab({ trip }: { trip: Trip }) {
   )
 }
 
-function PlaceRow({ p, n, next, only, onOpen, onToggle, paid }: { p: Place; n: number; next?: LL; only: boolean; onOpen: () => void; onToggle: () => void; paid?: string }) {
+function PlaceRow({ p, n, next, only, onOpen, onToggle, paid, est }: { p: Place; n: number; next?: LL; only: boolean; onOpen: () => void; onToggle: () => void; paid?: string; est?: string }) {
   const controls = useDragControls()
   const c = CATEGORY[p.category]
   return (
@@ -192,7 +192,7 @@ function PlaceRow({ p, n, next, only, onOpen, onToggle, paid }: { p: Place; n: n
             <div className="sub">
               <span className="cat" style={{ color: c.color }}>{c.label}</span>
               {p.duration ? <span>{fmtDur(p.duration)}</span> : null}
-              {paid ? <span className="paid">{paid}</span> : p.cost ? <span>{tr('1인 약 {0}', wonShort(p.cost))}</span> : null}
+              {paid ? <span className="paid">{paid}</span> : est ? <span>{tr('1인 약 {0}', est)}</span> : null}
             </div>
             {p.note && <div className="note">{p.note}</div>}
           </button>
@@ -460,9 +460,9 @@ function EditPlaceSheet({ trip, di, id, onClose, onMakeStay }: { trip: Trip; di:
             <CurrencySelect trip={trip} value={currency} onChange={setCurrency} />
           </div>
           <p className="hint" style={{ marginTop: -8 }}>
-            {Number(cost) > 0 && currency !== 'KRW' ? tr('약 {0}. ', won(toWon(trip, Number(cost), currency))) : ''}
+            {Number(cost) > 0 && currency !== baseOf(trip) ? tr('약 {0}. ', money(krwToBase(trip, toWon(trip, Number(cost), currency)), baseOf(trip))) : ''}
             {tr('투어·입장권·예약처럼 낸 돈 전체를 적으면 예산 탭의 지출로 들어갑니다. 결제한 사람과 나눌 사람은 예산 탭에서 고칠 수 있습니다.')}
-            {d.cost && !cost ? ` ${tr('추천 때 넣은 1인 예상 비용: {0}', wonShort(d.cost))}` : ''}
+            {d.cost && !cost ? ` ${tr('추천 때 넣은 1인 예상 비용: {0}', moneyShort(krwToBase(trip, d.cost), baseOf(trip)))}` : ''}
           </p>
           <div className="row">
             <label className="field"><span>{tr('날짜')}</span>

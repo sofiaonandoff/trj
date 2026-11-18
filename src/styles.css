@@ -551,3 +551,11 @@ button { cursor: pointer; border: 0; background: none; padding: 0; }
 .widget-steps small { color: var(--mute); font-size: 13px; line-height: 1.5; }
 .widget-steps .btn { justify-self: start; }
 .widget-steps a.btn { text-decoration: none; }
+
+/* ── 환율 ── */
+.rates { display: grid; gap: 8px; margin-top: 10px; }
+.rate-row { display: flex; align-items: center; gap: 8px; }
+.rate-from { flex: 0 0 auto; min-width: 92px; font-weight: 600; font-size: 14px; font-variant-numeric: tabular-nums; }
+.rate-row .input { flex: 1; min-width: 0; height: 42px; }
+.rate-to { flex: none; font-weight: 600; font-size: 14px; color: var(--mute); }
+.rate-tag { flex: none; font-size: 11.5px; color: var(--mute); padding: 3px 8px; border-radius: 999px; box-shadow: inset 0 0 0 1px var(--line); }

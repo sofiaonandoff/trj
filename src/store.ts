@@ -5,6 +5,7 @@ import { DESTINATIONS, destination, type Destination } from './data/destinations
 import { cityLabel, legEnds, newLegId } from './lib/legs'
 import { defaultChecklist, fitAfterArrival, planTrip, type Pace } from './lib/planner'
 import { airport } from './data/airports'
+import { defaultBase } from './data/currencies'
 import { addDays, dateRange, today, uid } from './lib/util'
 import { stamp } from './lib/merge'
 import type { Category, Day, DriveLink, ExpenseCategory, Flight, Leg, Place, Stay, Trip } from './types'
@@ -159,7 +160,7 @@ export function buildTrip(i: NewTripInput): Trip {
     start, end, days, flights: [],
     members: people.map((p, k) => ({ id: uid(), name: p.name, color: MEMBER_COLORS[k % MEMBER_COLORS.length], ...(p.email ? { email: p.email } : {}) })),
     expenses: [], checklist: defaultChecklist(d, Boolean(d?.domestic)), journal: {},
-    currency: d?.currency ?? 'KRW', rate: d?.rate ?? 1, budget: 0, createdAt: Date.now(),
+    currency: d?.currency ?? 'KRW', rate: d?.rate ?? 1, base: defaultBase(), budget: 0, createdAt: Date.now(),
   }
 }
 

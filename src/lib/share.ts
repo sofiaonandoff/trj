@@ -3,7 +3,7 @@ import LZString from 'lz-string'
 import { airlineOf, airport } from '../data/airports'
 import { CATEGORY } from '../data/destinations'
 import type { Trip } from '../types'
-import { toWon } from '../data/currencies'
+import { baseOf, krwToBase, money, toWon } from '../data/currencies'
 import { flightMinutes } from './flight'
 import { fmtDur, fmtRange, md, uid, weekday, won } from './util'
 
@@ -36,7 +36,7 @@ export function parseTripFile(text: string): Trip | null {
 export function viewOf(t: Trip): Trip {
   return {
     id: t.id, title: t.title, city: t.city, country: t.country, destId: t.destId, lat: t.lat, lng: t.lng, start: t.start, end: t.end,
-    legs: t.legs, currency: t.currency, rate: t.rate, rates: t.rates, budget: t.budget, createdAt: t.createdAt, updatedAt: t.updatedAt,
+    legs: t.legs, currency: t.currency, rate: t.rate, rates: t.rates, base: t.base, ratesEdited: t.ratesEdited, budget: t.budget, createdAt: t.createdAt, updatedAt: t.updatedAt,
     days: t.days.map((d) => ({ date: d.date, items: d.items.map(({ u: _u, ...p }) => p) })),
     flights: t.flights.map(({ u: _u, pnr: _p, seat: _s, ...f }) => f),
     stays: (t.stays ?? []).map(({ u: _u, code: _c, ...st }) => st),
@@ -71,7 +71,7 @@ export function toMarkdown(t: Trip) {
     out.push('')
   })
   const total = t.expenses.reduce((s, e) => s + toWon(t, e.amount, e.currency), 0)
-  if (total) out.push(tr('## 경비'), '', tr('총 {0} (1인 {1})', won(total), won(total / t.members.length)), '')
+  if (total) out.push(tr('## 경비'), '', tr('총 {0} (1인 {1})', money(krwToBase(t, total), baseOf(t)), money(krwToBase(t, total / t.members.length), baseOf(t))), '')
   return out.join('\n')
 }
 
