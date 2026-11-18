@@ -1,9 +1,10 @@
 import { tr } from '../i18n'
 import { motion } from 'framer-motion'
-import { ArrowLeft, BookOpen, Copy, Download, Eye, Link2, ListChecks, MoreHorizontal, Route, Send, Share2, UserPlus, Wallet } from 'lucide-react'
+import { ArrowLeft, BookOpen, Copy, Download, Eye, Link2, ListChecks, MoreHorizontal, Route, Send, Share2, Smartphone, UserPlus, Wallet } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { onAnnounced, takeAnnounced, type Invitee } from '../lib/invite'
 import { shareLink } from '../lib/share'
+import WidgetSheet from './WidgetSheet'
 import { NoViewServer, createViewLink, onViewLinks, removeViewLink, savedViewLink, shortViewLink } from '../lib/viewLink'
 import { driveConfigured, startViewLink, stopViewLink, viewLink } from '../lib/drive'
 import { diffDays, download, fmtRange, haptic, today } from '../lib/util'
@@ -125,6 +126,7 @@ function ShareSheet({ trip, open, onClose, onJournal, onManage }: { trip: Trip; 
  */
 function ViewLink({ trip }: { trip: Trip }) {
   const [busy, setBusy] = useState(false)
+  const [widget, setWidget] = useState(false)
   const [, rerender] = useState(0)
   useEffect(() => onViewLinks(() => rerender((n) => n + 1)), [])
   const saved = savedViewLink(trip.id)
@@ -165,6 +167,10 @@ function ViewLink({ trip }: { trip: Trip }) {
           {(saved || owner) && <button className="btn btn-quiet" disabled={busy} onClick={stop}>{tr('끄기')}</button>}
         </div>
       ) : <button className="btn btn-primary btn-block" disabled={busy} onClick={make}><Eye size={18} />{tr('보기 링크 만들기')}</button>}
+      {saved
+        ? <button className="btn btn-quiet btn-block" style={{ marginTop: 8 }} onClick={() => setWidget(true)}><Smartphone size={16} />{tr('아이폰 홈 화면 위젯 만들기')}</button>
+        : drive && <p className="hint">{tr('홈 화면 위젯은 짧은 보기 링크에서 쓸 수 있습니다 (앱 서버에 보기 저장소 연결 필요).')}</p>}
+      {saved && <WidgetSheet open={widget} onClose={() => setWidget(false)} viewId={saved.id} />}
     </section>
   )
 }
