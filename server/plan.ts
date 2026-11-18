@@ -38,42 +38,6 @@ const TRIP_SCHEMA = {
 }
 const MORE_SCHEMA = { type: 'object', properties: { items: { type: 'array', items: PLACE } }, required: ['items'] }
 const NAMES_SCHEMA = { type: 'object', properties: { names: { type: 'array', items: { type: 'string' } } }, required: ['names'] }
-const EXPENSE_CATS = ['food', 'stay', 'move', 'play', 'shop', 'etc'] as const
-const PHOTO_SCHEMA = {
-  type: 'object',
-  properties: {
-    items: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          kind: { type: 'string', enum: ['place', 'expense', 'flight'], description: 'place: somewhere the traveler visits (restaurant, sight, shop, hotel). expense: a cost with no place to visit (taxi, SIM card, transit card). flight: a flight ticket or boarding pass' },
-          name: { type: 'string', description: 'Place or item name' },
-          address: { type: 'string', description: 'Street address or area if visible, else empty' },
-          lat: { type: 'number', description: 'Real latitude if you know the place, else 0' },
-          lng: { type: 'number', description: 'Real longitude if you know the place, else 0' },
-          category: { type: 'string', enum: [...CATEGORIES] },
-          date: { type: 'string', description: 'Date of the visit or payment shown in the image as YYYY-MM-DD, else empty. For a hotel booking use the check-in date' },
-          time: { type: 'string', description: 'Time shown in the image as 24-hour HH:MM, else empty' },
-          duration: { type: 'integer', description: 'Likely minutes spent there' },
-          amount: { type: 'number', description: 'Total paid as printed, 0 if no price' },
-          currency: { type: 'string', description: 'ISO 4217 code of amount, empty if no price' },
-          amount_krw: { type: 'integer', description: 'amount converted to Korean won with a recent rate, 0 if no price' },
-          expense_category: { type: 'string', enum: [...EXPENSE_CATS] },
-          note: { type: 'string', description: 'One short useful detail (booking number, what was ordered)' },
-          flight_no: { type: 'string' }, from_iata: { type: 'string' }, to_iata: { type: 'string' },
-          dep_date: { type: 'string' }, dep_time: { type: 'string' }, arr_date: { type: 'string' }, arr_time: { type: 'string' },
-          seat: { type: 'string' }, pnr: { type: 'string' },
-        },
-        required: ['kind', 'name', 'category', 'date', 'time', 'amount', 'currency', 'amount_krw', 'expense_category', 'note'],
-      },
-    },
-  },
-  required: ['items'],
-}
-/** 브라우저가 줄여 보낸 사진만 받는다 (base64 약 2MB 이하) */
-const MAX_IMAGE = 2_800_000
-
 const str = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '')
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
 const isDate = (v: unknown): v is string => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)
@@ -90,7 +54,8 @@ function common(lang: string) {
   ].join('\n')
 }
 
-type Built = { prompt: string; schema: object; image?: { data: string; mime: string } }
+
+type Built = { prompt: string; schema: object }
 function buildPrompt(b: Record<string, unknown>): Built | { error: string } {
   const lang = b.lang === 'en' ? 'en' : 'ko'
   if (b.mode === 'names') {
@@ -105,30 +70,6 @@ function buildPrompt(b: Record<string, unknown>): Built | { error: string } {
         `Return "names" with exactly ${names.length} strings in the same order.`,
         ...names.map((n, i) => `${i + 1}. ${n}`),
       ].join('\n'),
-    }
-  }
-  if (b.mode === 'photo') {
-    const img = b.image as { data?: unknown; mime?: unknown } | undefined
-    const data = typeof img?.data === 'string' ? img.data : ''
-    const mime = typeof img?.mime === 'string' && /^image\/(jpeg|png|webp)$/.test(img.mime) ? img.mime : 'image/jpeg'
-    if (!data || data.length > MAX_IMAGE || !/^[A-Za-z0-9+/=]+$/.test(data.slice(0, 200))) return { error: 'bad_request' }
-    const language = lang === 'en' ? 'English' : 'Korean'
-    const taken = str(b.taken, 20)
-    return {
-      schema: PHOTO_SCHEMA,
-      image: { data, mime },
-      prompt: [
-        `A traveler on a trip to ${[str(b.city, 80), str(b.country, 60)].filter(Boolean).join(', ') || 'somewhere'}${isDate(b.start) && isDate(b.end) ? ` from ${b.start} to ${b.end}` : ''} added this image to their itinerary.`,
-        'It may be a receipt, a booking or ticket screenshot, a boarding pass, a map or listing screenshot, a menu, or a photo of a place or sign.',
-        'Read it and return what should go into the itinerary and the budget. Usually one item; return several only if the image clearly lists several separate bookings or places.',
-        taken ? `The photo was taken on ${taken}. Use that only if the image itself shows no date.` : '',
-        '- Read dates and times only from the image (or the photo date above). A date printed without a year is in the trip year.',
-        '- For a receipt from a shop or restaurant, kind is "place" and name is the shop name.',
-        '- For a boarding pass or flight ticket, kind is "flight" and fill the flight fields with IATA codes and 24-hour times.',
-        '- If the image shows nothing useful for a trip, return an empty "items".',
-        `- Write "name" and "note" in ${language}, as the place is usually written in ${language}.`,
-        'Return JSON only.',
-      ].filter(Boolean).join('\n'),
     }
   }
   const city = str(b.city, 80)
@@ -201,9 +142,10 @@ export async function handlePlan(body: unknown, env: PlanEnv): Promise<PlanResul
   const models = env.GEMINI_MODEL ? [env.GEMINI_MODEL, ...MODELS.filter((m) => m !== env.GEMINI_MODEL)] : MODELS
   let last = { status: 502, detail: 'no response' }
   let busyCount = 0
+  let quotaCount = 0
   // 추가 추천은 빨라야 하므로 생각 단계를 거의 생략하고, 일정 전체는 조금만 생각하게 한다
   const mode = (body as Record<string, unknown>).mode
-  const quick = mode === 'more' || mode === 'names' || mode === 'photo'
+  const quick = mode === 'more' || mode === 'names'
   const perTry = mode === 'names' ? 10_000 : quick ? 20_000 : 45_000
   const budget = mode === 'names' ? 15_000 : quick ? 34_000 : 85_000
   const began = Date.now()
@@ -211,7 +153,7 @@ export async function handlePlan(body: unknown, env: PlanEnv): Promise<PlanResul
     const remaining = budget - (Date.now() - began)
     if (remaining < 4_000) { last = { status: 504, detail: 'time budget' }; break }
     // 2.x 모델은 thinking_level을 받지 않는다
-    const generation_config = model.startsWith('gemini-2') ? undefined : { thinking_level: quick && mode !== 'photo' ? 'minimal' : 'low' }
+    const generation_config = model.startsWith('gemini-2') ? undefined : { thinking_level: quick ? 'minimal' : 'low' }
     let res: Response
     try {
       res = await fetch(`${base}/v1beta/interactions`, {
@@ -219,7 +161,7 @@ export async function handlePlan(body: unknown, env: PlanEnv): Promise<PlanResul
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY },
         body: JSON.stringify({
           model, generation_config,
-          input: built.image ? [{ type: 'text', text: built.prompt }, { type: 'image', data: built.image.data, mime_type: built.image.mime }] : built.prompt, response_format: { type: 'text', mime_type: 'application/json', schema: built.schema } }),
+          input: built.prompt, response_format: { type: 'text', mime_type: 'application/json', schema: built.schema } }),
         signal: AbortSignal.timeout(Math.min(perTry, remaining)),
       })
     } catch (e) {
@@ -239,13 +181,16 @@ export async function handlePlan(body: unknown, env: PlanEnv): Promise<PlanResul
     const detail = await res.text().then((t) => { try { return (JSON.parse(t) as { error?: { message?: string } }).error?.message ?? t } catch { return t } }).catch(() => '')
     last = { status: res.status, detail: detail.slice(0, 300) }
     // 모델이 없거나(404) 일시적으로 붐비면(503·500, high demand) 다음 모델로 넘어간다.
-    // 키 문제(401·403)와 한도 초과(429)는 다른 모델로 가도 같으므로 바로 알린다
+    // 무료 한도는 모델마다 따로 있으므로 한도 초과(429)도 다음 모델로 넘어간다. 키 문제(401·403)는 바로 알린다
     const missing = res.status === 404 || (res.status === 400 && /model/i.test(detail))
     const busy = res.status === 503 || res.status === 500 || /high demand|overloaded|unavailable/i.test(detail)
+    if (res.status === 429) { quotaCount++; continue }
     if (missing) continue
     if (busy) { busyCount++; await new Promise((r) => setTimeout(r, 400)); continue }
     break
   }
+  // 모든 모델이 한도를 넘었거나, 한도 초과 뒤 남은 모델이 없었으면 한도 초과로 알린다
+  if (quotaCount && last.status !== 401 && last.status !== 403 && last.status !== 504) last = { ...last, status: 429 }
   const error = last.status === 401 || last.status === 403 ? 'auth' : last.status === 429 ? 'quota' : last.status === 504 ? 'timeout' : busyCount ? 'busy' : 'upstream'
   return { status: last.status === 429 ? 429 : 502, json: { error, detail: last.detail } }
 }

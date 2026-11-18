@@ -1,14 +1,13 @@
 import { tr } from '../i18n'
 import { CalendarCheck, Loader2, Plane, Receipt, Undo2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { aiMessage } from '../lib/ai'
 import { applyDraft, dateFromLabel, readTripPhoto, undoApplied, type Applied } from '../lib/photoImport'
 import { md, won } from '../lib/util'
 import { putFlight, useStore } from '../store'
 import type { Trip } from '../types'
 import { Sheet } from './ui'
 
-interface Job { id: number; url: string; status: 'reading' | 'done' | 'error'; results: (Applied & { undone?: boolean })[]; error?: string }
+interface Job { id: number; url: string; status: 'reading' | 'done' | 'error'; stage?: string; results: (Applied & { undone?: boolean })[]; error?: string }
 
 const money = (a: { value: number; currency: string }) => (a.currency === 'KRW' ? won(a.value) : `${a.value.toLocaleString()} ${a.currency}`)
 
@@ -30,22 +29,22 @@ export default function PhotoImport({ trip, files, current, onClose, onGo }: { t
     const set = (id: number, patch: Partial<Job>) => setJobs((js) => js.map((j) => (j.id === id ? { ...j, ...patch } : j)))
     let alive = true
     ;(async () => {
-      // 두 장씩 동시에 읽는다
+      // 글자 인식은 무거우니 한 장씩 읽는다
       const queue = [...batch]
       const worker = async () => {
         for (let b = queue.shift(); b; b = queue.shift()) {
           try {
-            const drafts = await readTripPhoto(b.f, tripRef.current, current)
+            const drafts = await readTripPhoto(b.f, tripRef.current, current, (stage) => { if (alive) set(b.job.id, { stage }) })
             if (!alive) return
             const results: Applied[] = []
             mutate(trip.id, (t) => { for (const d of drafts) results.push(applyDraft(t, d, putFlight)) })
             set(b.job.id, { status: 'done', results })
           } catch (e) {
-            if (alive) set(b.job.id, { status: 'error', error: aiMessage(e) })
+            if (alive) set(b.job.id, { status: 'error', error: (e as Error).message || tr('사진을 읽지 못했습니다') })
           }
         }
       }
-      await Promise.all([worker(), worker()])
+      await worker()
     })()
     return () => { alive = false; batch.forEach((b) => URL.revokeObjectURL(b.job.url)) }
   }, [files]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -67,7 +66,7 @@ export default function PhotoImport({ trip, files, current, onClose, onGo }: { t
           <div className="import" key={j.id}>
             <img src={j.url} alt="" />
             <div className="grow">
-              {j.status === 'reading' && <p className="mute"><Loader2 size={15} className="spin" /> {tr('trj assistant가 읽고 있습니다')}</p>}
+              {j.status === 'reading' && <p className="mute"><Loader2 size={15} className="spin" /> {j.stage ?? tr('사진을 여는 중')}</p>}
               {j.status === 'error' && <p className="parsed miss">{j.error}</p>}
               {j.status === 'done' && !j.results.length && <p className="mute">{tr('일정에 넣을 내용을 찾지 못했습니다')}</p>}
               {j.results.map((r, k) => (
@@ -97,7 +96,7 @@ export default function PhotoImport({ trip, files, current, onClose, onGo }: { t
           </div>
         ))}
       </div>
-      <p className="hint">{tr('영수증, 예약 화면, 탑승권, 장소 사진을 읽습니다. 날짜는 사진 속 날짜, 없으면 찍은 날짜를 따르고, 금액은 예산 탭에 기록되고 동행과 똑같이 나눕니다.')}</p>
+      <p className="hint">{tr('영수증, 예약 화면, 탑승권, 장소 사진을 이 기기 안에서 읽습니다 (사진은 밖으로 나가지 않습니다). 날짜는 사진 속 날짜, 없으면 찍은 날짜를 따르고, 금액은 예산 탭에 기록되어 동행과 똑같이 나눕니다.')}</p>
       {!busy && (
         <div className="row" style={{ marginTop: 12 }}>
           {moved && <button className="btn btn-ghost" onClick={() => { onGo(moved.date); onClose() }}>{tr('{0}일차 보기', dayNo(moved.date))}</button>}

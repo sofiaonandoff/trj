@@ -106,20 +106,19 @@ export async function aiSuggest(trip: Trip, dayIndex: number): Promise<Place[]> 
 
 /** 장소 이름을 화면 언어로 읽을 수 있게 바꿔 받는다. 같은 이름은 다시 묻지 않는다 */
 const nameCache = new Map<string, string>()
+let namesPausedUntil = 0
 export async function aiLocalizeNames(names: string[], city?: string): Promise<string[]> {
   const key = (n: string) => `${lang}:${n}`
   const ask = [...new Set(names.filter((n) => !nameCache.has(key(n))))].slice(0, 12)
+  if (ask.length && Date.now() < namesPausedUntil) throw new AiError('quota')
   if (ask.length) {
-    const data = await call<{ names?: unknown[] }>({ mode: 'names', names: ask, city })
+    const data = await call<{ names?: unknown[] }>({ mode: 'names', names: ask, city }).catch((e) => {
+      // 한도 초과나 키 없음이면 30분 동안 묻지 않는다 (검색할 때마다 한도를 쓰지 않게)
+      if (e instanceof AiError && ['quota', 'not_configured', 'auth'].includes(e.code)) namesPausedUntil = Date.now() + 30 * 60_000
+      throw e
+    })
     const got = Array.isArray(data.names) ? data.names : []
     if (got.length === ask.length) ask.forEach((n, i) => { const v = typeof got[i] === 'string' ? (got[i] as string).trim().slice(0, 80) : ''; if (v) nameCache.set(key(n), v) })
   }
   return names.map((n) => nameCache.get(key(n)) ?? n)
-}
-
-/** 사진 한 장에서 모델이 읽어 낸 항목 (값 확인은 photoImport.ts가 한다) */
-export type PhotoRaw = Record<string, unknown>
-export async function aiReadPhoto(data: string, ctx: { city: string; country?: string; start: string; end: string; taken?: string }): Promise<PhotoRaw[]> {
-  const res = await call<{ items?: PhotoRaw[] }>({ mode: 'photo', image: { data, mime: 'image/jpeg' }, ...ctx })
-  return Array.isArray(res.items) ? res.items.slice(0, 6) : []
 }

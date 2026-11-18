@@ -1,23 +1,18 @@
 import { tr } from '../i18n'
-import type { Category, Expense, ExpenseCategory, Flight, Place, Trip } from '../types'
-import { aiReadPhoto, type PhotoRaw } from './ai'
+import type { Expense, Flight, Place, Trip } from '../types'
 import { reverseGeocode, searchPlaces } from './geocode'
 import { legOf } from './legs'
-import { readExif, toBase64Jpeg, type Exif } from './photos'
+import { ocrLangs, recognizeLines } from './ocr'
+import { readExif } from './photos'
+import { readText } from './receipt'
 import { fromMin, km, toMin, travelMin, uid } from './util'
 
 /**
- * "사진으로 추가": 영수증·예약 화면·탑승권·장소 사진을 읽어 일정과 예산에 넣는다.
- * 날짜는 사진 속 글자 → 사진을 찍은 날 → 지금 보고 있는 날 순으로 정하고,
- * 다른 날의 사진이면 그 날로 옮겨 넣는다.
+ * "사진으로 추가": 영수증·예약 화면·탑승권·장소 사진을 기기 안에서 읽어 일정과 예산에 넣는다 (AI를 쓰지 않는다).
+ * - 글자는 기기 안 OCR로 읽고(가게 이름, 날짜, 시각, 합계, 항공편),
+ * - 위치는 사진의 GPS → 가게 이름 검색 순으로 찾는다. 글자가 없는 풍경 사진은 GPS 위치의 장소 이름을 쓴다.
+ * 날짜는 사진 속 글자 → 사진을 찍은 날 → 지금 보고 있는 날 순으로 정하고, 다른 날의 사진이면 그 날로 옮겨 넣는다.
  */
-
-const CATS: Category[] = ['sight', 'food', 'cafe', 'shop', 'nature', 'culture', 'night', 'stay']
-const EXP: ExpenseCategory[] = ['food', 'stay', 'move', 'play', 'shop', 'etc']
-const isDate = (v: unknown): v is string => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)
-const isTime = (v: unknown): v is string => typeof v === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(v)
-const text = (v: unknown, max = 80) => (typeof v === 'string' ? v.trim().slice(0, max) : '')
-const pos = (v: unknown) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : 0 }
 
 export type DateFrom = 'image' | 'photo' | 'current'
 
@@ -49,76 +44,44 @@ export function toBudget(trip: Pick<Trip, 'currency'>, amount: number, currency:
   return null
 }
 
-async function locate(name: string, address: string, raw: PhotoRaw, exif: Exif, near: { lat: number; lng: number }) {
-  const close = (p: { lat: number; lng: number }, limit: number) => km(near, p) <= limit
-  // 현장에서 찍은 사진이면 GPS가 가장 정확하다 (화면 캡처에는 GPS가 없다)
-  if (exif.lat !== undefined && exif.lng !== undefined && close({ lat: exif.lat, lng: exif.lng }, 250)) return { lat: exif.lat, lng: exif.lng }
-  for (const q of [address && `${name} ${address}`, name].filter(Boolean) as string[]) {
-    const hit = (await searchPlaces(q, near).catch(() => [])).find((r) => !r.airport && close(r, 80))
-    if (hit) return { lat: hit.lat, lng: hit.lng }
-  }
-  const lat = Number(raw.lat), lng = Number(raw.lng)
-  if (Number.isFinite(lat) && Number.isFinite(lng) && (lat || lng) && close({ lat, lng }, 250)) return { lat, lng }
-  return null
-}
-
-/** 모델이 읽은 항목 하나를 확인해 넣을 거리로 만든다 */
-async function toDraft(raw: PhotoRaw, trip: Trip, exif: Exif, current: string): Promise<Draft | null> {
+/** 사진 한 장을 읽는다. onStage로 지금 하는 일을 알린다 */
+export async function readTripPhoto(file: File, trip: Trip, current: string, onStage?: (s: string) => void): Promise<Draft[]> {
   const days = trip.days.map((d) => d.date)
-  const kind = raw.kind === 'flight' || raw.kind === 'expense' ? raw.kind : 'place'
-  const name = text(raw.name)
-
-  if (kind === 'flight') {
-    const no = text(raw.flight_no, 10).toUpperCase().replace(/\s/g, '')
-    const from = text(raw.from_iata, 3).toUpperCase(), to = text(raw.to_iata, 3).toUpperCase()
-    if (/^[A-Z0-9]{2}\d{1,4}$/.test(no) && /^[A-Z]{3}$/.test(from) && /^[A-Z]{3}$/.test(to) && isDate(raw.dep_date) && isTime(raw.dep_time)) {
-      const arrDate = isDate(raw.arr_date) ? raw.arr_date : raw.dep_date
-      const arrTime = isTime(raw.arr_time) ? raw.arr_time : raw.dep_time
-      return {
-        date: raw.dep_date, dateFrom: 'image',
-        flight: { id: uid(), flightNo: no, from, to, depDate: raw.dep_date, depTime: raw.dep_time, arrDate, arrTime, seat: text(raw.seat, 6) || undefined, pnr: text(raw.pnr, 10) || undefined },
-      }
-    }
-    // 항공편 정보가 모자라면 비용만 남긴다
-  }
-
-  const { date, from } = pickDate(days, isDate(raw.date) ? raw.date : undefined, exif.date, current)
-  const money = toBudget(trip, pos(raw.amount), text(raw.currency, 3), pos(raw.amount_krw))
-  const expCat = EXP.includes(raw.expense_category as ExpenseCategory) ? (raw.expense_category as ExpenseCategory) : 'etc'
-  const note = text(raw.note, 120)
-  const expense = money && name ? { id: uid(), title: money.extra ? `${name} (${money.extra})` : name, amount: money.amount, currency: money.currency, category: expCat, date } : undefined
-
-  if (kind !== 'place' || !name) return expense ? { date, dateFrom: from, expense } : null
-  const where = await locate(name, text(raw.address, 120), raw, exif, legOf(trip, date))
-  if (!where) return expense ? { date, dateFrom: from, expense, noPlace: true } : null
-  const time = isTime(raw.time) ? raw.time : from === 'photo' && exif.time ? exif.time : undefined
-  const duration = Math.round(Number(raw.duration))
-  return {
-    date, dateFrom: from, expense,
-    place: {
-      id: uid(), name, ...where,
-      category: CATS.includes(raw.category as Category) ? (raw.category as Category) : 'sight',
-      time, duration: Number.isFinite(duration) && duration > 0 ? Math.min(600, Math.max(15, duration)) : 60,
-      note: note || undefined,
-    },
-  }
-}
-
-/** 사진 한 장을 읽는다. AI를 쓸 수 없으면 사진의 GPS 위치로 장소만이라도 찾는다 */
-export async function readTripPhoto(file: File, trip: Trip, current: string): Promise<Draft[]> {
   const exif = await readExif(file)
-  const leg = legOf(trip, current)
-  let raws: PhotoRaw[]
-  try {
-    raws = await aiReadPhoto(await toBase64Jpeg(file), { city: leg.city, country: leg.country, start: trip.start, end: trip.end, taken: exif.date })
-  } catch (e) {
-    if (exif.lat === undefined || exif.lng === undefined) throw e
-    const spot = await reverseGeocode(exif.lat, exif.lng).catch(() => null)
-    if (!spot) throw e
-    raws = [{ kind: 'place', name: spot.name, lat: spot.lat, lng: spot.lng, category: spot.category }]
+  const here = legOf(trip, current)
+  onStage?.(tr('글자를 읽는 중'))
+  const lines = await recognizeLines(file, ocrLangs(here.country ?? trip.country), (p) => onStage?.(tr('글자 인식 준비 중 {0}%', Math.round(p * 100)))).catch(() => [])
+  const r = readText(lines, days, trip.currency)
+  const out: Draft[] = r.flights.map((f) => ({ date: f.depDate, dateFrom: 'image' as const, flight: f }))
+  if (out.length && !r.amount) return out
+
+  const { date, from } = pickDate(days, r.date, exif.date, current)
+  const near = legOf(trip, date)
+  const money = r.amount ? toBudget(trip, r.amount, r.currency ?? trip.currency, 0) : null
+  const documentLike = Boolean(r.amount || r.date)
+  const gps = exif.lat !== undefined && exif.lng !== undefined && km(near, { lat: exif.lat, lng: exif.lng }) <= 250 ? { lat: exif.lat, lng: exif.lng } : undefined
+
+  onStage?.(tr('장소를 찾는 중'))
+  let name = r.name
+  let where: { lat: number; lng: number } | undefined
+  if (!r.costOnly) {
+    if (gps) {
+      where = gps
+      // 영수증이면 글자 속 가게 이름을, 풍경 사진이면 그 위치의 장소 이름을 쓴다
+      if (!documentLike || !name) name = (await reverseGeocode(gps.lat, gps.lng).catch(() => null))?.name ?? name
+    } else if (name) {
+      const hit = (await searchPlaces(name, near).catch(() => [])).find((x) => !x.airport && km(near, x) <= 80)
+      if (hit) where = { lat: hit.lat, lng: hit.lng }
+    }
   }
-  const out: Draft[] = []
-  for (const r of raws) { const d = await toDraft(r, trip, exif, current); if (d) out.push(d) }
+  const title = name ?? (r.costOnly ? tr('교통비') : tr('사진 속 결제'))
+  const expense = money ? { id: uid(), title: money.extra ? `${title} (${money.extra})` : title, amount: money.amount, currency: money.currency, category: r.expenseCategory, date } : undefined
+  if (where && name) {
+    out.push({
+      date, dateFrom: from, expense,
+      place: { id: uid(), name, ...where, category: r.category, time: r.time ?? (from === 'photo' ? exif.time : undefined), duration: r.category === 'stay' ? 60 : r.category === 'cafe' ? 45 : 60 },
+    })
+  } else if (expense) out.push({ date, dateFrom: from, expense, noPlace: !r.costOnly })
   return out
 }
 
