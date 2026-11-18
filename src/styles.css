@@ -317,6 +317,7 @@ button { cursor: pointer; border: 0; background: none; padding: 0; }
 @media (min-width: 600px) { .wide-only { display: inline; } }
 .imports { display: grid; gap: 10px; margin-bottom: 12px; }
 .import { display: flex; gap: 12px; align-items: flex-start; padding: 10px; border-radius: var(--r-s); background: var(--surface); border: 1px solid var(--line); }
+.import-doc { width: 56px; height: 56px; border-radius: 10px; flex: none; display: grid; place-items: center; background: var(--sunk); font-size: 12px; font-weight: 700; color: var(--mute); }
 .import > img { width: 56px; height: 56px; border-radius: 10px; object-fit: cover; flex: none; }
 .import p { margin: 6px 0 0; font-size: 13.5px; display: flex; align-items: center; gap: 6px; }
 .import-row { display: flex; align-items: flex-start; gap: 6px; }

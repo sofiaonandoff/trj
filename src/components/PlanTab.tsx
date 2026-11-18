@@ -107,7 +107,7 @@ export default function PlanTab({ trip }: { trip: Trip }) {
         <button className="btn btn-primary" onClick={() => setAdding('search')}><Plus size={18} />{tr('장소 추가')}</button>
         <label className="btn btn-ghost">
           <Camera size={18} />{tr('사진으로 추가')}
-          <input type="file" accept="image/*" multiple hidden onChange={(e) => { const f = [...(e.target.files ?? [])]; e.target.value = ''; if (f.length) setPhotos(f) }} />
+          <input type="file" accept="image/*,application/pdf" multiple hidden onChange={(e) => { const f = [...(e.target.files ?? [])]; e.target.value = ''; if (f.length) setPhotos(f) }} />
         </label>
         <button className="btn btn-ghost" onClick={() => setFlight('new')} aria-label={tr('항공편 추가')}><Plane size={18} /><span className="wide-only">{tr('항공편')}</span></button>
       </div>

@@ -2,7 +2,7 @@ import { tr } from '../i18n'
 import type { Expense, Flight, Place, Trip } from '../types'
 import { reverseGeocode, searchPlaces } from './geocode'
 import { legOf } from './legs'
-import { ocrLangs, recognizeLines } from './ocr'
+import { ocrPasses, recognizeLines } from './ocr'
 import { readExif } from './photos'
 import { readText } from './receipt'
 import { fromMin, km, toMin, travelMin, uid } from './util'
@@ -47,10 +47,13 @@ export function toBudget(trip: Pick<Trip, 'currency'>, amount: number, currency:
 /** 사진 한 장을 읽는다. onStage로 지금 하는 일을 알린다 */
 export async function readTripPhoto(file: File, trip: Trip, current: string, onStage?: (s: string) => void): Promise<Draft[]> {
   const days = trip.days.map((d) => d.date)
-  const exif = await readExif(file)
+  const pdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name)
+  const exif = pdf ? {} : await readExif(file)
   const here = legOf(trip, current)
   onStage?.(tr('글자를 읽는 중'))
-  const lines = await recognizeLines(file, ocrLangs(here.country ?? trip.country), (p) => onStage?.(tr('글자 인식 준비 중 {0}%', Math.round(p * 100)))).catch(() => [])
+  const lines = pdf
+    ? await import('./pdfText').then((m) => m.pdfLines(file)).catch(() => [])
+    : await recognizeLines(file, ocrPasses(here.country ?? trip.country), (p) => onStage?.(tr('글자 인식 준비 중 {0}%', Math.round(p * 100)))).catch(() => [])
   const r = readText(lines, days, trip.currency)
   const out: Draft[] = r.flights.map((f) => ({ date: f.depDate, dateFrom: 'image' as const, flight: f }))
   if (out.length && !r.amount) return out
@@ -79,7 +82,7 @@ export async function readTripPhoto(file: File, trip: Trip, current: string, onS
   if (where && name) {
     out.push({
       date, dateFrom: from, expense,
-      place: { id: uid(), name, ...where, category: r.category, time: r.time ?? (from === 'photo' ? exif.time : undefined), duration: r.category === 'stay' ? 60 : r.category === 'cafe' ? 45 : 60 },
+      place: { id: uid(), name, ...where, category: r.category, note: r.code ? tr('예약번호 {0}', r.code) : undefined, time: r.time ?? (from === 'photo' ? exif.time : undefined), duration: r.category === 'stay' ? 60 : r.category === 'cafe' ? 45 : 60 },
     })
   } else if (expense) out.push({ date, dateFrom: from, expense, noPlace: !r.costOnly })
   return out

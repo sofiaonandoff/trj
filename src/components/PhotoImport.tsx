@@ -24,7 +24,7 @@ export default function PhotoImport({ trip, files, current, onClose, onGo }: { t
 
   useEffect(() => {
     if (!files?.length) return
-    const batch = files.slice(0, 10).map((f) => ({ f, job: { id: ++seq.current, url: URL.createObjectURL(f), status: 'reading' as const, results: [] } }))
+    const batch = files.slice(0, 10).map((f) => ({ f, job: { id: ++seq.current, url: f.type.startsWith('image/') ? URL.createObjectURL(f) : '', status: 'reading' as const, results: [] } }))
     setJobs(batch.map((b) => b.job))
     const set = (id: number, patch: Partial<Job>) => setJobs((js) => js.map((j) => (j.id === id ? { ...j, ...patch } : j)))
     let alive = true
@@ -64,7 +64,7 @@ export default function PhotoImport({ trip, files, current, onClose, onGo }: { t
       <div className="imports">
         {jobs.map((j) => (
           <div className="import" key={j.id}>
-            <img src={j.url} alt="" />
+            {j.url ? <img src={j.url} alt="" /> : <span className="import-doc">PDF</span>}
             <div className="grow">
               {j.status === 'reading' && <p className="mute"><Loader2 size={15} className="spin" /> {j.stage ?? tr('사진을 여는 중')}</p>}
               {j.status === 'error' && <p className="parsed miss">{j.error}</p>}
@@ -96,7 +96,7 @@ export default function PhotoImport({ trip, files, current, onClose, onGo }: { t
           </div>
         ))}
       </div>
-      <p className="hint">{tr('영수증, 예약 화면, 탑승권, 장소 사진을 이 기기 안에서 읽습니다 (사진은 밖으로 나가지 않습니다). 날짜는 사진 속 날짜, 없으면 찍은 날짜를 따르고, 금액은 예산 탭에 기록되어 동행과 똑같이 나눕니다.')}</p>
+      <p className="hint">{tr('영수증, 예약 화면, 탑승권, 장소 사진, 예약 확인서 PDF를 이 기기 안에서 읽습니다 (사진은 밖으로 나가지 않습니다). 날짜는 사진 속 날짜, 없으면 찍은 날짜를 따르고, 금액은 예산 탭에 기록되어 동행과 똑같이 나눕니다.')}</p>
       {!busy && (
         <div className="row" style={{ marginTop: 12 }}>
           {moved && <button className="btn btn-ghost" onClick={() => { onGo(moved.date); onClose() }}>{tr('{0}일차 보기', dayNo(moved.date))}</button>}

@@ -1,4 +1,5 @@
-import { findDates, findName, findTime, findTotal, parseAmount, pickTripDate, readText } from '../src/lib/receipt'
+import { despaceCJK } from '../src/lib/ocr'
+import { findCode, findDates, findName, findTime, findTotal, fixBrand, parseAmount, pickTripDate, readText } from '../src/lib/receipt'
 
 let fail = 0
 const check = (label: string, ok: boolean, got?: unknown) => { if (!ok) fail++; console.log(ok ? 'PASS' : 'FAIL', label, ok ? '' : JSON.stringify(got)) }
@@ -30,5 +31,17 @@ const yen = readText(L(['ローソン', '2026年12月3日', '合計 ¥1,280'], 0
 check('일본 편의점 엔화', yen.amount === 1280 && yen.currency === 'JPY' && yen.date === '2026-12-03', yen)
 const won = readText(L(['명동교자', '2026-12-02 12:10', '칼국수 11,000', '합계 22,000원'], 0), days, 'KRW')
 check('원화 합계', won.amount === 22000 && won.currency === 'KRW' && won.name === '명동교자', won)
+check('긴 달 이름', pickTripDate('Check-in: Thursday, December 3, 2026\nCheck-out: Saturday, December 5, 2026', days) === '2026-12-03', pickTripDate('Check-in: Thursday, December 3, 2026', days))
+check('체크인 날짜를 체크아웃보다 먼저', pickTripDate('체크아웃 2026.12.05\n체크인 2026.12.03', days) === '2026-12-03')
+check('OCR 연도 오류 2226 → 2026', pickTripDate('체크인 2226.12.02 (수)', days) === '2026-12-02')
+check('호텔 이름 (Hotel 속 tel)', findName(L(['Agoda booking confirmation', 'Riva Surya Bangkok Hotel', 'Booking ID: 1987654321'], 1)) === 'Riva Surya Bangkok Hotel')
+check('예약 확정 머리말은 이름이 아니다', findName(L(['예약 확정', '아바니 리버사이드 방콕', '체크인 2026.12.02'], 0)) === '아바니 리버사이드 방콕')
+check('주소 줄은 이름이 아니다', findName(L(['서울 중구 명동10길 29', '사업자 201-81-12345'], 0)) === undefined)
+check('예약번호', findCode('Booking ID: 1987654321') === '1987654321' && findCode('예약번호 1234567890') === '1234567890')
+check('바트 기호가 [4로 읽힘', parseAmount('Total paid [4250.00') === 250)
+check('천 단위 띄어 읽힘', parseAmount('合計 ¥2 200') === 2200)
+check('체인 이름 보정', fixBrand('T-ELEVEN') === '7-Eleven')
+check('CJK 띄어 읽힘 붙이기', despaceCJK('명 동 교 자 본점') === '명동교자 본점' && despaceCJK('一 蘭 渋谷 店') === '一蘭渋谷店' && despaceCJK('2026 年 12 月 3 日') === '2026年12月3日', [despaceCJK('명 동 교 자 본점'), despaceCJK('一 蘭 渋谷 店'), despaceCJK('2026 年 12 月 3 日')])
+check('평범한 한국어 띄어쓰기는 그대로', despaceCJK('총 결제금액 482,300') === '총 결제금액 482,300')
 console.log(fail ? `${fail}개 실패` : '모두 통과')
 process.exit(fail ? 1 : 0)

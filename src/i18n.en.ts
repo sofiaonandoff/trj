@@ -352,10 +352,11 @@ export const EN: Record<string, string> = {
   "보고 있던 날": "day you were viewing",
   "사진을 읽지 못했습니다": "Couldn't read the photo",
   "사진을 여는 중": "Opening photo",
-  "영수증, 예약 화면, 탑승권, 장소 사진을 이 기기 안에서 읽습니다 (사진은 밖으로 나가지 않습니다). 날짜는 사진 속 날짜, 없으면 찍은 날짜를 따르고, 금액은 예산 탭에 기록되어 동행과 똑같이 나눕니다.": "Reads receipts, booking screens, boarding passes and photos of places on this device (photos never leave it). The date comes from the photo's contents, or when it was taken. Amounts go to the budget, split evenly with companions.",
   "글자를 읽는 중": "Reading text",
   "글자 인식 준비 중 {0}%": "Preparing text recognition {0}%",
   "장소를 찾는 중": "Finding the place",
   "교통비": "Transport",
   "사진 속 결제": "Payment from photo",
+  "영수증, 예약 화면, 탑승권, 장소 사진, 예약 확인서 PDF를 이 기기 안에서 읽습니다 (사진은 밖으로 나가지 않습니다). 날짜는 사진 속 날짜, 없으면 찍은 날짜를 따르고, 금액은 예산 탭에 기록되어 동행과 똑같이 나눕니다.": "Reads receipts, booking screens, boarding passes, photos of places and booking PDFs on this device (nothing leaves it). The date comes from the contents, or when the photo was taken. Amounts go to the budget, split evenly with companions.",
+  "예약번호 {0}": "Booking no. {0}",
 }
