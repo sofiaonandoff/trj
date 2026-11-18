@@ -60,6 +60,8 @@ function buildPrompt(b: Record<string, unknown>): { prompt: string; schema: obje
   const where = [city, str(b.country, 60)].filter(Boolean).join(', ')
   const lang = b.lang === 'en' ? 'en' : 'ko'
   const interests = Array.isArray(b.interests) ? b.interests.filter((x): x is string => CATEGORIES.includes(x as never)) : []
+  const arrive = str(b.arrive, 120)
+  const depart = str(b.depart, 120)
   const exclude = Array.isArray(b.exclude) ? b.exclude.map((x) => str(x, 80)).filter(Boolean).slice(0, 60) : []
 
   if (b.mode === 'more') {
@@ -68,7 +70,7 @@ function buildPrompt(b: Record<string, unknown>): { prompt: string; schema: obje
     return {
       schema: MORE_SCHEMA,
       prompt: [
-        `Suggest 6 more places to visit in ${where}${at}, closest first, for a traveler's day plan.`,
+        `Suggest 5 more places to visit in ${where}${at}, closest first, for a traveler's day plan. Keep each note very short.`,
         interests.length ? `Prefer these kinds of places: ${interests.join(', ')}.` : '',
         exclude.length ? `Do not suggest any of these, they are already in the plan: ${exclude.join('; ')}.` : '',
         common(lang),
@@ -90,7 +92,10 @@ function buildPrompt(b: Record<string, unknown>): { prompt: string; schema: obje
       interests.length ? `The traveler especially wants: ${interests.join(', ')}. Still include the essential sights.` : '',
       `Return exactly ${days} days in "days", in date order.`,
       '- Put places that are close to each other on the same day, and order each day to avoid backtracking.',
-      days > 1 ? '- Day 1 is the arrival day: start after 15:00 with a light plan. The last day is the departure day: finish by mid-afternoon.' : '',
+      arrive ? `- Day 1: the traveler arrives ${arrive.startsWith('from ') ? `${arrive} (ground or domestic transfer)` : `at ${arrive}`} and can start around 14:00. Begin with places close to that arrival point or on the way into the city, then move toward the center. Keep day 1 light.` : '',
+      depart && days > 1 ? `- Last day: the traveler leaves from ${depart}. Use places near ${depart} or on the way there, and finish by 15:00.` : '',
+      !arrive && days > 1 ? '- Day 1 starts in the morning.' : '',
+      exclude.length ? `- Do not include any of these, they are already planned: ${exclude.join('; ')}.` : '',
       '- Include places to eat at sensible meal times when food is among the interests.',
       '- Do not repeat a place.',
       common(lang),
@@ -121,15 +126,27 @@ export async function handlePlan(body: unknown, env: PlanEnv): Promise<PlanResul
   const models = env.GEMINI_MODEL ? [env.GEMINI_MODEL, ...MODELS.filter((m) => m !== env.GEMINI_MODEL)] : MODELS
   let last = { status: 502, detail: 'no response' }
   let busyCount = 0
+  // 추가 추천은 빨라야 하므로 생각 단계를 거의 생략하고, 일정 전체는 조금만 생각하게 한다
+  const quick = (body as Record<string, unknown>).mode === 'more'
+  const perTry = quick ? 18_000 : 45_000
+  const budget = quick ? 32_000 : 85_000
+  const began = Date.now()
   for (const model of models) {
+    const remaining = budget - (Date.now() - began)
+    if (remaining < 4_000) { last = { status: 504, detail: 'time budget' }; break }
+    // 2.x 모델은 thinking_level을 받지 않는다
+    const generation_config = model.startsWith('gemini-2') ? undefined : { thinking_level: quick ? 'minimal' : 'low' }
     let res: Response
     try {
       res = await fetch(`${base}/v1beta/interactions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY },
-        body: JSON.stringify({ model, input: built.prompt, response_format: { type: 'text', mime_type: 'application/json', schema: built.schema } }),
+        body: JSON.stringify({ model, input: built.prompt, generation_config, response_format: { type: 'text', mime_type: 'application/json', schema: built.schema } }),
+        signal: AbortSignal.timeout(Math.min(perTry, remaining)),
       })
     } catch (e) {
+      // 한 모델이 너무 오래 걸리면 다음 모델로 넘어간다
+      if ((e as Error).name === 'TimeoutError' || (e as Error).name === 'AbortError') { last = { status: 504, detail: `${model} timed out` }; busyCount++; continue }
       return { status: 502, json: { error: 'upstream', detail: (e as Error).message } }
     }
     if (res.ok) {
@@ -151,6 +168,6 @@ export async function handlePlan(body: unknown, env: PlanEnv): Promise<PlanResul
     if (busy) { busyCount++; await new Promise((r) => setTimeout(r, 400)); continue }
     break
   }
-  const error = last.status === 401 || last.status === 403 ? 'auth' : last.status === 429 ? 'quota' : busyCount ? 'busy' : 'upstream'
+  const error = last.status === 401 || last.status === 403 ? 'auth' : last.status === 429 ? 'quota' : last.status === 504 ? 'timeout' : busyCount ? 'busy' : 'upstream'
   return { status: last.status === 429 ? 429 : 502, json: { error, detail: last.detail } }
 }

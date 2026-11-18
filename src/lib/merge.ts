@@ -2,7 +2,8 @@ import type { Day, JournalEntry, Place, Trip } from '../types'
 import { dateRange } from './util'
 
 /** 여행 기본 정보: 한 묶음으로 나중에 고친 쪽을 따른다 */
-const META = ['title', 'city', 'country', 'destId', 'lat', 'lng', 'start', 'end', 'currency', 'rate', 'budget'] as const
+const META = ['title', 'city', 'country', 'destId', 'lat', 'lng', 'start', 'end', 'currency', 'rate', 'budget', 'legs'] as const
+const metaSig = (t: Trip) => JSON.stringify(META.map((k) => t[k] ?? null))
 
 type Entity = { id: string; u?: number }
 const sig = (x: object) => JSON.stringify({ ...x, u: undefined })
@@ -36,14 +37,18 @@ export function stamp(prev: Trip, next: Trip, now = Date.now()) {
 
   for (const d of next.days) if (ids(prev.days.find((x) => x.date === d.date)) !== ids(d)) d.u = now
   for (const [date, j] of Object.entries(next.journal)) if ((prev.journal[date]?.text ?? '') !== j.text) j.u = now
-  if (META.some((k) => prev[k] !== next[k])) next.metaU = now
+  for (const [date, j] of Object.entries(prev.journal)) {
+    const kept = new Set(next.journal[date]?.photos ?? [])
+    for (const k of j.photos) if (k.startsWith('drive:') && !kept.has(k)) del[k] = now
+  }
+  if (metaSig(prev) !== metaSig(next)) next.metaU = now
   if (content(prev) !== content(next)) next.updatedAt = now
 }
 
 /** 기기 사이에 오가는 내용만 남긴다: 동기화 상태와 사진 키(이 기기 전용)는 뺀다 */
 export function shared(t: Trip): Trip {
   const { drive: _drive, ...rest } = t
-  return { ...rest, journal: Object.fromEntries(Object.entries(t.journal).map(([k, v]) => [k, { ...v, photos: [] }])) }
+  return { ...rest, journal: Object.fromEntries(Object.entries(t.journal).map(([k, v]) => [k, { ...v, photos: v.photos.filter((p) => p.startsWith('drive:')) }])) }
 }
 
 const byId = <T extends Entity>(a: T[]) => [...a].sort((x, y) => x.id.localeCompare(y.id))
@@ -53,7 +58,7 @@ function content(t: Trip) {
   return JSON.stringify({
     meta: META.map((k) => s[k]), days: s.days.map((d) => [d.date, d.items]),
     flights: byId(s.flights), members: byId(s.members), expenses: byId(s.expenses), checklist: byId(s.checklist),
-    journal: Object.entries(s.journal).filter(([, v]) => v.text).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => [k, v.text]),
+    journal: Object.entries(s.journal).filter(([, v]) => v.text || v.photos.length).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => [k, v.text, v.photos]),
   })
 }
 export const sameContent = (a: Trip, b: Trip) => content(a) === content(b)
@@ -116,7 +121,10 @@ export function mergeTrips(local: Trip, remote: Trip): Trip {
   for (const date of new Set([...Object.keys(local.journal), ...Object.keys(remote.journal)])) {
     const l = local.journal[date], r = remote.journal[date]
     const text = r && (r.u ?? 0) > (l?.u ?? 0) ? r : l ?? r!
-    journal[date] = { text: text.text, u: text.u, photos: l?.photos ?? [] }
+    // 사진: 이 기기의 사진에 다른 쪽에서 백업한 사진을 더한다. 어느 쪽에서든 지운 사진은 뺀다
+    const photos = [...(l?.photos ?? [])]
+    for (const k of r?.photos ?? []) if (k.startsWith('drive:') && !photos.includes(k)) photos.push(k)
+    journal[date] = { text: text.text, u: text.u, photos: photos.filter((k) => !(k in deleted)) }
   }
   out.journal = journal
   out.updatedAt = Math.max(local.updatedAt ?? local.createdAt, remote.updatedAt ?? remote.createdAt)

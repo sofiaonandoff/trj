@@ -43,6 +43,22 @@ export interface Member {
   id: string
   name: string
   color: string
+  /** 함께 편집 초대를 보낸 Google 계정 이메일 (선택) */
+  email?: string
+}
+
+/** 여러 도시를 도는 여행의 한 구간. 예: 방콕 → 콘깬 → 방콕 */
+export interface Leg {
+  id: string
+  city: string
+  country?: string
+  lat: number
+  lng: number
+  /** 추천 데이터가 있는 도시면 그 id */
+  destId?: string
+  /** 이 구간의 첫날과 마지막 날 (여행 마지막 구간은 돌아오는 날까지) */
+  start: string
+  end: string
 }
 
 export type ExpenseCategory = 'food' | 'stay' | 'move' | 'play' | 'shop' | 'etc'
@@ -74,7 +90,8 @@ export interface JournalEntry {
   /** 마지막으로 고친 시각(ms). 기기 간 병합에 쓴다 */
   u?: number
   text: string
-  photos: string[] // IndexedDB 키
+  /** 'photo-…'는 이 기기에만 있는 사진, 'drive:<파일 id>'는 Drive에 백업된 사진 */
+  photos: string[]
 }
 
 export interface Trip {
@@ -103,6 +120,8 @@ export interface Trip {
   metaU?: number
   /** 지운 항목 id → 지운 시각. 다른 기기에서 되살아나지 않게 한다 */
   deleted?: Record<string, number>
+  /** 두 도시 이상을 도는 여행의 구간들. 한 도시 여행이면 없다 */
+  legs?: Leg[]
   /** 이 기기에만 두는 Drive 동기화 상태 (파일에는 넣지 않는다) */
   drive?: DriveLink
 }

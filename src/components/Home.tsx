@@ -5,6 +5,7 @@ import { diffDays, fmtRange, haptic, today } from '../lib/util'
 import { sampleTrip, useStore } from '../store'
 import type { Trip } from '../types'
 import { DriveChip, ImportSheet } from './DriveUI'
+import { legOf } from '../lib/legs'
 import { Avatars, LangButton, Logo, RouteArt, go } from './ui'
 
 function when(t: Trip) {
@@ -35,7 +36,7 @@ export default function Home() {
             <button className="icon-btn" aria-label={tr('여행 불러오기')} onClick={() => setImporting(true)}><FolderDown size={20} /></button>
           </span>
         </div>
-        <h1>{next ? (now >= next.start ? tr('{0}에서의 오늘', next.city) : tr('다음 궤적은 {0}', next.city)) : tr('어디로 선을 그어 볼까요')}</h1>
+        <h1>{next ? (now >= next.start ? tr('{0}에서의 오늘', legOf(next, now).city) : tr('다음 여정은 {0}', next.city)) : tr('다음 여정은 어디인가요?')}</h1>
       </header>
 
       <main className="home-body">

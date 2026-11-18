@@ -3,6 +3,7 @@ import { useSyncExternalStore } from 'react'
 import { useStore } from '../store'
 import type { DriveLink, Trip } from '../types'
 import { mergeTrips, sameContent, shared } from './merge'
+import { getPhoto, putPhoto, removePhoto, setRemotePhotoFetcher } from './photos'
 
 /**
  * Google Drive 동기화. 서버 없이 브라우저가 사용자의 Drive에 직접 읽고 쓴다.
@@ -36,7 +37,7 @@ const listeners = new Set<() => void>()
 const setStatus = (s: DriveStatus) => { status = s; listeners.forEach((f) => f()) }
 export const useDriveStatus = () => useSyncExternalStore((l) => { listeners.add(l); return () => listeners.delete(l) }, () => status)
 
-interface Meta { connected: boolean; folderId?: string; lastSync?: number }
+interface Meta { connected: boolean; folderId?: string; photoFolderId?: string; lastSync?: number }
 const META_KEY = 'trj-drive-v1'
 const getMeta = (): Meta => { try { return JSON.parse(localStorage.getItem(META_KEY) ?? '') as Meta } catch { return { connected: false } } }
 const setMeta = (patch: Partial<Meta>) => localStorage.setItem(META_KEY, JSON.stringify({ ...getMeta(), ...patch }))
@@ -91,6 +92,15 @@ async function requestToken(selectAccount = false): Promise<string> {
     })
     client.requestAccessToken({ prompt: selectAccount ? 'select_account' : '' })
   })
+}
+
+/** Google 로그인 스크립트를 미리 받아 둔다. 버튼을 누른 순간 팝업을 바로 띄우기 위해서다 */
+export const preloadGoogle = () => { if (CLIENT_ID) loadGis().catch(() => undefined) }
+
+/** 로그인이 되어 있지 않으면 로그인 창을 띄운다. 사용자가 버튼을 누른 직후에 불러야 팝업이 막히지 않는다 */
+export async function ensureToken() {
+  if (!tokenValid()) await requestToken()
+  setMeta({ connected: true })
 }
 
 class AuthError extends Error {}
@@ -250,11 +260,15 @@ export async function syncNow(opts: { pull?: boolean } = {}) {
   const watched = opts.pull ? trips.filter((t) => t.drive?.fileId && t.drive.role && !isPending(t)) : []
   if (!tokenValid()) return setStatus({ kind: 'reconnect', pending: pending.length })
   if (!navigator.onLine) return setStatus({ kind: 'offline' })
-  if (!pending.length && !watched.length) return setStatus({ kind: 'idle', lastSync: meta.lastSync })
+  const photosWaiting = localPhotoCount() > 0
+  if (!pending.length && !watched.length && !photosWaiting) return setStatus({ kind: 'idle', lastSync: meta.lastSync })
   running = true
   if (pending.length) setStatus({ kind: 'syncing' })
   try {
     for (const t of [...pending, ...watched]) await syncTrip(t.id)
+    if (photosWaiting) await backupPhotos()
+    // 사진 백업으로 여행이 바뀌었으면(사진 키가 Drive 것으로 바뀜) 그것도 올린다
+    for (const t of store().trips.filter(isPending)) await syncTrip(t.id)
     const now = Date.now()
     setMeta({ lastSync: now })
     setStatus({ kind: 'idle', lastSync: now })
@@ -302,7 +316,10 @@ export async function startSharing(tripId: string): Promise<string> {
   await syncTrip(tripId)
   const t = store().trips.find((x) => x.id === tripId)
   if (!t?.drive?.fileId) throw new Error(tr('Drive에 올리지 못했습니다'))
-  if (!t.drive.role) store().patchDrive(tripId, { role: 'owner' })
+  if (!t.drive.role) {
+    store().patchDrive(tripId, { role: 'owner' })
+    for (const j of Object.values(t.journal)) for (const k of j.photos) if (k.startsWith('drive:')) await openToCompanions(k.slice(6))
+  }
   setStatus({ kind: 'idle', lastSync: Date.now() })
   return t.drive.fileId
 }
@@ -392,6 +409,78 @@ export async function openSharedTrip(fileId: string, switchAccount = false): Pro
   scheduleSync(1000)
   return merged.id
 }
+
+/* ── 사진 백업 ── */
+/** 아직 Drive에 올리지 않은 사진 수 (모든 여행) */
+export function localPhotoCount(trips: Trip[] = store().trips) {
+  return trips.reduce((n, t) => n + Object.values(t.journal).reduce((m, j) => m + j.photos.filter((k) => k.startsWith('photo-')).length, 0), 0)
+}
+
+async function ensurePhotoFolder(): Promise<string> {
+  const meta = getMeta()
+  if (meta.photoFolderId) {
+    const r = await api(`${API}/files/${meta.photoFolderId}?fields=id,trashed`)
+    if (r.ok && !(await r.json()).trashed) return meta.photoFolderId
+  }
+  const parent = await ensureFolder()
+  const q = encodeURIComponent(`name='photos' and mimeType='${FOLDER_MIME}' and '${parent}' in parents and trashed=false`)
+  const found = await api(`${API}/files?q=${q}&fields=files(id)`)
+  let id = found.ok ? ((await found.json()).files as { id: string }[])[0]?.id : undefined
+  if (!id) {
+    const r = await api(`${API}/files?fields=id`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'photos', mimeType: FOLDER_MIME, parents: [parent] }) })
+    if (!r.ok) throw new Error(tr('Drive에 사진 폴더를 만들지 못했습니다'))
+    id = (await r.json()).id as string
+  }
+  setMeta({ photoFolderId: id })
+  return id
+}
+
+/** 함께 편집하는 동행도 볼 수 있게, 링크가 있는 사람은 볼 수 있는 사진으로 바꾼다 (파일 id는 여행 참여자만 안다) */
+async function openToCompanions(fileId: string) {
+  await api(`${API}/files/${fileId}/permissions?fields=id`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'anyone', role: 'reader' }) }).catch(() => undefined)
+}
+
+async function uploadPhoto(blob: Blob, name: string): Promise<string> {
+  const boundary = `trj${Math.random().toString(36).slice(2)}`
+  const metadata = JSON.stringify({ name, parents: [await ensurePhotoFolder()], mimeType: 'image/jpeg' })
+  const body = new Blob([`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n--${boundary}\r\nContent-Type: image/jpeg\r\n\r\n`, blob, `\r\n--${boundary}--`])
+  const r = await api(`${UPLOAD}/files?uploadType=multipart&fields=id`, { method: 'POST', headers: { 'Content-Type': `multipart/related; boundary=${boundary}` }, body })
+  if (!r.ok) throw new Error(tr('사진을 Drive에 올리지 못했습니다'))
+  return (await r.json()).id as string
+}
+
+/** 이 기기에만 있는 사진을 Drive에 올리고, 여행의 사진 키를 Drive 것으로 바꾼다. 한 번에 12장씩 */
+async function backupPhotos() {
+  let done = 0
+  for (const t of store().trips) {
+    for (const [date, j] of Object.entries(t.journal)) {
+      for (const key of j.photos.filter((k) => k.startsWith('photo-'))) {
+        if (done >= 12) { scheduleSync(2000); return }
+        const blob = await getPhoto(key)
+        if (!blob) { store().mutate(t.id, (x) => { x.journal[date].photos = x.journal[date].photos.filter((k) => k !== key) }); continue }
+        const id = await uploadPhoto(blob, `${t.title} ${date}.jpg`)
+        if (t.drive?.role) await openToCompanions(id)
+        const remote = `drive:${id}`
+        await putPhoto(remote, blob)
+        store().mutate(t.id, (x) => { const e = x.journal[date]; if (e) e.photos = e.photos.map((k) => (k === key ? remote : k)) })
+        await removePhoto(key)
+        done++
+      }
+    }
+  }
+}
+
+/** Drive에 백업된 사진 받기: 내 사진은 로그인으로, 동행의 사진은 링크 공개 파일이라 API 키로 받는다 */
+setRemotePhotoFetcher(async (fileId) => {
+  if (tokenValid()) {
+    try { const r = await api(`${API}/files/${fileId}?alt=media`); if (r.ok) return await r.blob() } catch { /* 아래 방법으로 */ }
+  }
+  if (API_KEY) {
+    const r = await fetch(`${API}/files/${fileId}?alt=media&key=${API_KEY}`)
+    if (r.ok) return await r.blob()
+  }
+  return null
+})
 
 /* ── 시작 ── */
 if (typeof window !== 'undefined') {

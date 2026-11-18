@@ -1,5 +1,6 @@
 import { BRAND, LOGO } from '../brand'
 import { lang, tr } from '../i18n'
+import { legOf } from './legs'
 import { mapSnapshot, type MapSnapshot, type MapTint } from './mapSnapshot'
 import { airlineOf } from '../data/airports'
 import { CATEGORY } from '../data/destinations'
@@ -133,9 +134,11 @@ function drawHead(c: Ctx, r: Rect, th: Theme, trip: Trip, page: Page) {
   let size = 136
   c.fillStyle = th.fg
   c.letterSpacing = '-4px'
-  do { c.font = font(800, size); size -= 6 } while (c.measureText(trip.city).width > r.w && size > 60)
+  // 하루 페이지는 그 날 머무는 도시, 요약은 도는 도시 전체
+  const city = day ? legOf(trip, day.date).city : trip.city
+  do { c.font = font(800, size); size -= 6 } while (c.measureText(city).width > r.w && size > 60)
   y += size + 34
-  c.fillText(fit(c, trip.city, r.w), r.x - 4, y)
+  c.fillText(fit(c, city, r.w), r.x - 4, y)
   c.letterSpacing = '0px'
 
   c.font = font(500, 34); c.fillStyle = th.sub

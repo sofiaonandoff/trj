@@ -1,11 +1,12 @@
 import { tr } from './i18n'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { DESTINATIONS, type Destination } from './data/destinations'
+import { DESTINATIONS, destination, type Destination } from './data/destinations'
+import { cityLabel, legEnds, newLegId } from './lib/legs'
 import { defaultChecklist, planTrip, type Pace } from './lib/planner'
 import { addDays, dateRange, today, uid } from './lib/util'
 import { stamp } from './lib/merge'
-import type { Category, DriveLink, Flight, Trip } from './types'
+import type { Category, Day, DriveLink, Flight, Leg, Trip } from './types'
 
 export const MEMBER_COLORS = ['#2F5D57', '#B0603A', '#5C7F4E', '#96506A', '#5E5A86', '#8A6A48']
 
@@ -57,43 +58,59 @@ export function putFlight(t: Trip, f: Flight) {
   syncDays(t)
 }
 
+export interface LegInput { dest?: Destination; city: string; country?: string; lat?: number; lng?: number; start: string; end: string }
+export interface Person { name: string; email?: string }
 export interface NewTripInput {
-  dest?: Destination
-  city: string
-  country?: string
-  lat?: number
-  lng?: number
-  start: string
-  end: string
+  legs: LegInput[]
   pace: Pace
   interests: Category[]
-  people: string[]
+  people: Person[]
   recommend: boolean
 }
 
 export function buildTrip(i: NewTripInput): Trip {
-  const d = i.dest
-  const nights = dateRange(i.start, i.end).length - 1
-  const days = d && i.recommend
-    ? planTrip({ dest: d, start: i.start, end: i.end, pace: i.pace, interests: i.interests, seed: Date.now() % 100000 })
-    : dateRange(i.start, i.end).map((date) => ({ date, items: [] }))
-  const names = i.people.length ? i.people : [tr('나')]
+  const legs: Leg[] = i.legs.map((l) => ({
+    id: newLegId(), city: l.city, country: l.dest?.country ?? l.country ?? '', destId: l.dest?.id,
+    lat: l.dest?.lat ?? l.lat ?? 37.5665, lng: l.dest?.lng ?? l.lng ?? 126.978, start: l.start, end: l.end,
+  }))
+  const first = legs[0], start = legs[0].start, end = legs[legs.length - 1].end
+  const nights = dateRange(start, end).length - 1
+  const days: Day[] = dateRange(start, end).map((date) => ({ date, items: [] }))
+  if (i.recommend) planBuiltIn(days, legs, i.pace, i.interests)
+  const d = i.legs[0].dest
+  const people = i.people.length ? i.people : [{ name: tr('나') }]
+  const city = cityLabel(legs.map((l) => l.city))
   return {
     id: uid(),
-    title: `${i.city} ${nights ? tr('{0}박 {1}일', nights, nights + 1) : tr('당일치기')}`,
-    city: i.city, country: d?.country ?? i.country ?? '', destId: d?.id,
-    lat: d?.lat ?? i.lat ?? 37.5665, lng: d?.lng ?? i.lng ?? 126.978,
-    start: i.start, end: i.end, days, flights: [],
-    members: names.map((name, k) => ({ id: uid(), name, color: MEMBER_COLORS[k % MEMBER_COLORS.length] })),
+    title: `${city} ${nights ? tr('{0}박 {1}일', nights, nights + 1) : tr('당일치기')}`,
+    city, country: first.country ?? '', destId: first.destId, lat: first.lat, lng: first.lng,
+    legs: legs.length > 1 ? legs : undefined,
+    start, end, days, flights: [],
+    members: people.map((p, k) => ({ id: uid(), name: p.name, color: MEMBER_COLORS[k % MEMBER_COLORS.length], ...(p.email ? { email: p.email } : {}) })),
     expenses: [], checklist: defaultChecklist(d, Boolean(d?.domestic)), journal: {},
     currency: d?.currency ?? 'KRW', rate: d?.rate ?? 1, budget: 0, createdAt: Date.now(),
   }
 }
 
+/** 기기 안의 기본 추천으로 구간마다 일정을 채운다 (추천 데이터가 있는 도시만). 같은 도시를 다시 오면 겹치지 않게 한다 */
+export function planBuiltIn(days: Day[], legs: Leg[], pace: Pace, interests: Category[], only?: Set<number>) {
+  const used = new Set<string>(days.flatMap((d) => d.items.map((p) => p.name)))
+  legs.forEach((leg, k) => {
+    const dest = destination(leg.destId)
+    if (!dest || (only && !only.has(k))) return
+    const { arrive, depart } = legEnds(legs, k)
+    const planned = planTrip({ dest, start: leg.start, end: leg.end, pace, interests, seed: (Date.now() + k) % 100000, arrive, depart, exclude: used })
+    for (const pd of planned) {
+      const day = days.find((x) => x.date === pd.date)
+      if (day) { day.items.push(...pd.items); pd.items.forEach((p) => used.add(p.name)) }
+    }
+  })
+}
+
 /** 처음 열었을 때 둘러볼 수 있는 예시 여행. 항공편 시각은 실제 운항 정보가 아니다. */
 export function sampleTrip(): Trip {
   const start = addDays(today(), 12), end = addDays(start, 3)
-  const t = buildTrip({ dest: DESTINATIONS[0], city: tr('도쿄'), start, end, pace: 'normal', interests: ['food', 'culture', 'cafe'], people: [tr('나'), tr('지우'), tr('민서')], recommend: true })
+  const t = buildTrip({ legs: [{ dest: DESTINATIONS[0], city: tr('도쿄'), start, end }], pace: 'normal', interests: ['food', 'culture', 'cafe'], people: [{ name: tr('나') }, { name: tr('지우') }, { name: tr('민서') }], recommend: true })
   t.title = tr('도쿄 3박 4일 (예시)')
   t.budget = 2400000
   putFlight(t, { id: uid(), flightNo: 'KE703', from: 'ICN', to: 'NRT', depDate: start, depTime: '10:10', arrDate: start, arrTime: '12:35', seat: '34A', pnr: 'TRJ7K2' })

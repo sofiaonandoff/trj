@@ -4,6 +4,7 @@ import { ArrowLeft, BookOpen, Copy, Download, ImageDown, Link2, ListChecks, Rout
 import { useState } from 'react'
 import { shareLink, toMarkdown, toYouTube } from '../lib/share'
 import { diffDays, download, fmtRange, haptic, today } from '../lib/util'
+import { fitLegs } from '../lib/legs'
 import { syncDays, useStore } from '../store'
 import type { Trip } from '../types'
 import BudgetTab from './BudgetTab'
@@ -93,7 +94,7 @@ function ShareSheet({ trip, open, onClose, onExport }: { trip: Trip; open: boole
   }
   const setDates = (start: string, end: string) => {
     if (end < start) return toast(tr('돌아오는 날이 떠나는 날보다 빠릅니다'))
-    mutate(trip.id, (t) => { t.start = start; t.end = end; syncDays(t) })
+    mutate(trip.id, (t) => { const prev = t.start; t.start = start; t.end = end; syncDays(t); fitLegs(t, prev) })
   }
 
   return (

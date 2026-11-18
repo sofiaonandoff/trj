@@ -1,5 +1,6 @@
 import { lang, tr } from '../i18n'
 import type { Category, Day, Place, Trip } from '../types'
+import { legOf } from './legs'
 import { dateRange, km, uid } from './util'
 
 /** 서버 함수(/api/plan)가 알려 준 실패 이유 */
@@ -23,9 +24,10 @@ export function aiMessage(e: unknown): string {
   }
 }
 
-async function call<T>(body: object): Promise<T> {
+async function call<T>(body: { mode: string; [k: string]: unknown }): Promise<T> {
   const ac = new AbortController()
-  const timer = setTimeout(() => ac.abort(), 60_000)
+  // 서버가 정한 시간 예산보다 조금 길게 기다린다
+  const timer = setTimeout(() => ac.abort(), body.mode === 'more' ? 40_000 : 95_000)
   try {
     const res = await fetch('/api/plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, lang }), signal: ac.signal })
     // 서버 함수가 없는 곳(정적 호스팅)에서는 JSON이 아닌 답이 온다
@@ -62,7 +64,13 @@ function toPlace(r: Raw, center?: { lat: number; lng: number }): Place | null {
   }
 }
 
-export interface AiTripInput { city: string; country?: string; lat?: number; lng?: number; start: string; end: string; pace: string; interests: Category[] }
+export interface AiTripInput {
+  city: string; country?: string; lat?: number; lng?: number; start: string; end: string; pace: string; interests: Category[]
+  /** 도착 지점 설명: 'Suvarnabhumi Airport (BKK)' 또는 'from Bangkok' */
+  arrive?: string
+  depart?: string
+  exclude?: string[]
+}
 
 /** 여행 전체 일정을 Gemini에게 받는다. 날짜 수는 여행 기간에 맞춘다 */
 export async function aiPlanTrip(i: AiTripInput): Promise<Day[]> {
@@ -80,15 +88,17 @@ export async function aiPlanTrip(i: AiTripInput): Promise<Day[]> {
 /** 그 날 동선 가까이에서 더 갈 만한 곳을 받는다 */
 export async function aiSuggest(trip: Trip, dayIndex: number): Promise<Place[]> {
   const items = trip.days[dayIndex]?.items ?? []
+  // 여러 도시를 도는 여행이면 그 날 머무는 도시 기준으로 추천받는다
+  const leg = legOf(trip, trip.days[dayIndex]?.date ?? trip.start)
   const near = items.length
     ? { lat: items.reduce((s, p) => s + p.lat, 0) / items.length, lng: items.reduce((s, p) => s + p.lng, 0) / items.length }
-    : { lat: trip.lat, lng: trip.lng }
+    : { lat: leg.lat, lng: leg.lng }
   const data = await call<{ items?: Raw[] }>({
-    mode: 'more', city: trip.city, country: trip.country, near,
+    mode: 'more', city: leg.city, country: leg.country, near,
     exclude: trip.days.flatMap((d) => d.items.map((p) => p.name)),
   })
   const have = new Set(trip.days.flatMap((d) => d.items.map((p) => p.name)))
-  const out = (data.items ?? []).map((r) => toPlace(r, trip)).filter((p): p is Place => Boolean(p) && !have.has(p!.name))
+  const out = (data.items ?? []).map((r) => toPlace(r, leg)).filter((p): p is Place => Boolean(p) && !have.has(p!.name))
   if (!out.length) throw new AiError('bad_output')
   // 이 화면에서는 시각을 쓰지 않는다: 넣을 때 앞 장소에 이어서 정한다
   return out.map((p) => ({ ...p, time: undefined }))

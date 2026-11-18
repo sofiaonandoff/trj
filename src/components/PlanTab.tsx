@@ -5,6 +5,7 @@ import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { AIRPORTS, airlineOf, airport } from '../data/airports'
 import { CATEGORY, destination } from '../data/destinations'
 import { aiMessage, aiSuggest } from '../lib/ai'
+import { legOf } from '../lib/legs'
 import { flightMinutes, isComplete, parseFlightText } from '../lib/flight'
 import { searchPlaces, type GeoResult } from '../lib/geocode'
 import { poiToPlace, retime, shortest, suggestions } from '../lib/planner'
@@ -17,10 +18,14 @@ import { Sheet, toast } from './ui'
 const MapView = lazy(() => import('./MapView'))
 const CATS = Object.keys(CATEGORY) as Category[]
 
+const day0date = (t: Trip, i: number) => t.days[Math.min(i, t.days.length - 1)]?.date ?? t.start
+
 export default function PlanTab({ trip }: { trip: Trip }) {
   const mutate = useStore((s) => s.mutate)
   const [idx, setIdx] = useState(0)
-  const [adding, setAdding] = useState(false)
+  /** 장소 추가 시트: 닫힘(false) 또는 처음 보여 줄 탭 */
+  const [adding, setAdding] = useState<false | AddMode>(false)
+  const leg = legOf(trip, day0date(trip, idx))
   const [editId, setEditId] = useState<string>()
   const [flight, setFlight] = useState<Flight | 'new'>()
   const di = Math.min(idx, trip.days.length - 1)
@@ -60,7 +65,7 @@ export default function PlanTab({ trip }: { trip: Trip }) {
 
       <div className="plan-map">
         <Suspense fallback={null}>
-          <MapView points={points} arcs={arcs} center={trip} onPick={(i) => { const p = day.items[i]; if (p) setEditId(p.id) }} />
+          <MapView points={points} arcs={arcs} center={leg} onPick={(i) => { const p = day.items[i]; if (p) setEditId(p.id) }} />
         </Suspense>
       </div>
 
@@ -77,8 +82,11 @@ export default function PlanTab({ trip }: { trip: Trip }) {
 
       {rows === 0 ? (
         <div className="empty">
-          <strong>{tr('이 날은 비어 있습니다')}</strong>
-          {tr('장소를 넣으면 지도에 선이 이어집니다.')}
+          <strong>{tr('{0}에서 보낼 하루가 비어 있습니다', leg.city)}</strong>
+          {tr('trj assistant가 이 날 머무는 곳 가까이에서 갈 만한 곳을 골라 드립니다.')}
+          <div style={{ marginTop: 16 }}>
+            <button className="btn btn-primary" onClick={() => setAdding('ai-auto')}><Sparkles size={18} />{tr('trj assistant에게 추천받기')}</button>
+          </div>
         </div>
       ) : (
         <Reorder.Group as="ol" axis="y" className="tl" values={day.items} onReorder={(next) => mutate(trip.id, (t) => { t.days[di].items = next as Place[] })}>
@@ -94,7 +102,7 @@ export default function PlanTab({ trip }: { trip: Trip }) {
       )}
 
       <div className="add-row">
-        <button className="btn btn-primary" onClick={() => setAdding(true)}><Plus size={18} />{tr('장소 추가')}</button>
+        <button className="btn btn-primary" onClick={() => setAdding('search')}><Plus size={18} />{tr('장소 추가')}</button>
         <button className="btn btn-ghost" onClick={() => setFlight('new')}><Plane size={18} />{tr('항공편 추가')}</button>
       </div>
       {day.items.length > 1 && (
@@ -104,7 +112,7 @@ export default function PlanTab({ trip }: { trip: Trip }) {
         </div>
       )}
 
-      <AddPlaceSheet open={adding} onClose={() => setAdding(false)} trip={trip} di={di} />
+      <AddPlaceSheet open={adding !== false} initial={adding || 'search'} onClose={() => setAdding(false)} trip={trip} di={di} />
       <EditPlaceSheet trip={trip} di={di} id={editId} onClose={() => setEditId(undefined)} />
       <FlightSheet trip={trip} flight={flight} onClose={() => setFlight(undefined)} />
     </>
@@ -173,18 +181,27 @@ function FlightRow({ f, arriving, only, onOpen }: { f: Flight; arriving?: boolea
 }
 
 /* ── 장소 추가 ── */
-function AddPlaceSheet({ open, onClose, trip, di }: { open: boolean; onClose: () => void; trip: Trip; di: number }) {
+type AddMode = 'search' | 'ai' | 'ai-auto' | 'pick'
+
+function AddPlaceSheet({ open, initial, onClose, trip, di }: { open: boolean; initial: AddMode; onClose: () => void; trip: Trip; di: number }) {
   const mutate = useStore((s) => s.mutate)
-  const dest = destination(trip.destId)
-  const [mode, setMode] = useState<'pick' | 'ai' | 'search'>(dest ? 'pick' : 'ai')
+  // 여러 도시를 도는 여행이면 그 날 머무는 도시를 기준으로 찾고 추천한다
+  const leg = legOf(trip, trip.days[di]?.date ?? trip.start)
+  const dest = destination(leg.destId)
+  const [mode, setMode] = useState<'pick' | 'ai' | 'search'>('search')
   const [ai, setAi] = useState<Place[]>()
   const [aiBusy, setAiBusy] = useState(false)
   const [aiError, setAiError] = useState('')
-  useEffect(() => { setAi(undefined); setAiError('') }, [di, open])
   const askAi = async () => {
     setAiBusy(true); setAiError('')
     try { setAi(await aiSuggest(trip, di)) } catch (e) { setAiError(aiMessage(e)) } finally { setAiBusy(false) }
   }
+  useEffect(() => {
+    if (!open) return
+    setAi(undefined); setAiError('')
+    setMode(initial === 'ai-auto' ? 'ai' : initial)
+    if (initial === 'ai-auto') void askAi()
+  }, [di, open]) // eslint-disable-line react-hooks/exhaustive-deps
   const [q, setQ] = useState('')
   const [results, setResults] = useState<GeoResult[]>()
   const [error, setError] = useState('')
@@ -194,11 +211,11 @@ function AddPlaceSheet({ open, onClose, trip, di }: { open: boolean; onClose: ()
     if (q.trim().length < 2) { setResults(undefined); return }
     const ac = new AbortController()
     const id = setTimeout(() => {
-      searchPlaces(q, trip, ac.signal).then((r) => { setResults(r); setError('') })
+      searchPlaces(q, leg, ac.signal).then((r) => { setResults(r); setError('') })
         .catch((e) => { if (e.name !== 'AbortError') setError(tr('검색하지 못했습니다. 연결을 확인한 뒤 다시 입력하세요')) })
     }, 500)
     return () => { clearTimeout(id); ac.abort() }
-  }, [q, trip])
+  }, [q, leg.lat, leg.lng])
 
   const add = (place: Place) => {
     mutate(trip.id, (t) => {
@@ -214,9 +231,9 @@ function AddPlaceSheet({ open, onClose, trip, di }: { open: boolean; onClose: ()
   return (
     <Sheet open={open} onClose={onClose} title={tr('{0}일차에 장소 추가', di + 1)}>
       <div className="seg" style={{ marginBottom: 14 }}>
-        {dest && <button aria-pressed={mode === 'pick'} onClick={() => setMode('pick')}>{tr('가까운 추천')}</button>}
-        <button aria-pressed={mode === 'ai'} onClick={() => setMode('ai')}>{tr('AI 추천')}</button>
         <button aria-pressed={mode === 'search'} onClick={() => setMode('search')}>{tr('직접 검색')}</button>
+        <button aria-pressed={mode === 'ai'} onClick={() => { setMode('ai'); if (!ai && !aiBusy) void askAi() }}>trj assistant</button>
+        {dest && <button aria-pressed={mode === 'pick'} onClick={() => setMode('pick')}>{tr('가까운 추천')}</button>}
       </div>
       {mode === 'ai' ? (
         <>
@@ -235,10 +252,15 @@ function AddPlaceSheet({ open, onClose, trip, di }: { open: boolean; onClose: ()
             </div>
           )}
           {aiError && <p className="parsed miss" style={{ marginBottom: 12 }}>{aiError}</p>}
+          {aiBusy && !ai && (
+            <div className="list ai-wait" aria-busy="true" style={{ marginBottom: 12 }}>
+              {[0, 1, 2].map((i) => <div key={i}><i className="dot" /><span className="grow"><b className="bar" /><small className="bar short" /></span></div>)}
+            </div>
+          )}
           <button className="btn btn-ghost btn-block" disabled={aiBusy} onClick={askAi}>
             <Sparkles size={18} className={aiBusy ? 'spin' : undefined} />{aiBusy ? tr('추천을 받는 중') : ai ? tr('다른 곳 더 추천받기') : tr('이 날 동선에 맞는 곳 추천받기')}
           </button>
-          <p className="hint">{tr('Gemini가 고른 곳입니다. 위치와 영업시간은 가기 전에 확인하세요.')}</p>
+          <p className="hint">{tr('trj assistant(Gemini)가 고른 곳입니다. 위치와 영업시간은 가기 전에 확인하세요.')}</p>
         </>
       ) : mode === 'pick' && dest ? (
         picks.length ? (
@@ -258,7 +280,7 @@ function AddPlaceSheet({ open, onClose, trip, di }: { open: boolean; onClose: ()
       ) : (
         <>
           <label className="field"><span className="sr">{tr('장소 검색')}</span>
-            <input autoFocus placeholder={tr('{0}에서 가고 싶은 곳', trip.city)} value={q} onChange={(e) => setQ(e.target.value)} />
+            <input autoFocus placeholder={tr('{0}에서 가고 싶은 곳', leg.city)} value={q} onChange={(e) => setQ(e.target.value)} />
           </label>
           {error && <p className="hint" style={{ color: 'var(--warn)' }}>{error}</p>}
           {results && (results.length ? (
@@ -266,7 +288,7 @@ function AddPlaceSheet({ open, onClose, trip, di }: { open: boolean; onClose: ()
               {results.map((r, i) => (
                 <button key={i} onClick={() => add({ id: uid(), name: r.name, lat: r.lat, lng: r.lng, category: r.category, duration: 60 })}>
                   <MapPin size={18} className="mute" />
-                  <span className="grow"><b>{r.name}</b><small>{r.detail}</small></span>
+                  <span className="grow"><b>{r.name}</b><small>{[r.local, r.detail].filter(Boolean).join(' · ')}</small></span>
                   <Plus size={18} className="mute" />
                 </button>
               ))}

@@ -1,6 +1,8 @@
 import { tr } from '../i18n'
-import { Camera, X } from 'lucide-react'
-import { removePhoto, savePhoto, usePhoto } from '../lib/photos'
+import { Camera, Cloud, CloudOff, ImageOff, Images, X } from 'lucide-react'
+import { useState } from 'react'
+import { connectDrive, driveConfigured, useDriveStatus } from '../lib/drive'
+import { isBackedUp, removePhoto, savePhoto, usePhoto } from '../lib/photos'
 import { md, weekday } from '../lib/util'
 import { useStore } from '../store'
 import type { Trip } from '../types'
@@ -10,7 +12,9 @@ function Photo({ k, onRemove }: { k: string; onRemove: () => void }) {
   const url = usePhoto(k)
   return (
     <div className="photo">
-      {url && <img src={url} alt="" loading="lazy" />}
+      {url && url !== 'missing' && <img src={url} alt="" loading="lazy" />}
+      {url === 'missing' && <span className="photo-missing" title={tr('이 사진을 불러오지 못했습니다')}><ImageOff size={20} /></span>}
+      {isBackedUp(k) && url !== 'missing' && <span className="photo-cloud" aria-label={tr('Drive에 백업됨')}><Cloud size={12} /></span>}
       <button onClick={onRemove} aria-label={tr('사진 삭제')}><X size={14} /></button>
     </div>
   )
@@ -18,17 +22,81 @@ function Photo({ k, onRemove }: { k: string; onRemove: () => void }) {
 
 export default function JournalTab({ trip }: { trip: Trip }) {
   const mutate = useStore((s) => s.mutate)
+  const drive = useDriveStatus()
+  const [busy, setBusy] = useState(false)
+
+  const store = async (files: File[]) => {
+    const saved = []
+    for (const f of files.slice(0, 40)) {
+      try { saved.push(await savePhoto(f)) } catch { /* 열 수 없는 형식은 건너뛴다 */ }
+    }
+    if (saved.length < Math.min(files.length, 40)) toast(tr('일부 사진은 열 수 없는 형식이라 건너뛰었습니다'))
+    return saved
+  }
 
   const addPhotos = async (date: string, files: FileList | null) => {
     if (!files?.length) return
-    try {
-      const keys = await Promise.all([...files].slice(0, 12).map(savePhoto))
-      mutate(trip.id, (t) => { (t.journal[date] ??= { text: '', photos: [] }).photos.push(...keys) })
-    } catch { toast(tr('사진을 저장하지 못했습니다. 다른 형식의 사진으로 다시 시도하세요')) }
+    const saved = await store([...files])
+    mutate(trip.id, (t) => { (t.journal[date] ??= { text: '', photos: [] }).photos.push(...saved.map((s) => s.key)) })
   }
+
+  /** 여러 장을 한 번에: 찍은 날짜를 읽어 그 날의 기록에 넣는다 */
+  const addByDate = async (files: FileList | null) => {
+    if (!files?.length) return
+    setBusy(true)
+    try {
+      const saved = await store([...files])
+      const dates = trip.days.map((d) => d.date)
+      let outside = 0, unknown = 0
+      const place = (d?: string) => {
+        if (!d) { unknown++; return dates.includes(new Date().toISOString().slice(0, 10)) ? new Date().toISOString().slice(0, 10) : dates[0] }
+        if (dates.includes(d)) return d
+        outside++
+        return d < dates[0] ? dates[0] : dates[dates.length - 1]
+      }
+      mutate(trip.id, (t) => { for (const s of saved) (t.journal[place(s.date)] ??= { text: '', photos: [] }).photos.push(s.key) })
+      const notes = [tr('사진 {0}장을 찍은 날짜에 맞춰 넣었습니다', saved.length - outside - unknown)]
+      if (outside) notes.push(tr('{0}장은 여행 기간 밖이라 가까운 날에 넣었습니다', outside))
+      if (unknown) notes.push(tr('{0}장은 찍은 날짜가 없어 첫날이나 오늘에 넣었습니다', unknown))
+      toast(notes.join('. '))
+    } finally { setBusy(false) }
+  }
+
+  const all = Object.values(trip.journal).flatMap((j) => j.photos)
+  const backed = all.filter(isBackedUp).length
+  const waiting = all.length - backed
+  const connected = drive.kind !== 'off'
+  const shared = Boolean(trip.drive?.role)
 
   return (
     <>
+      <section className="panel photo-bar">
+        <div className="between">
+          <div>
+            <h2 style={{ margin: 0 }}>{tr('여행 사진')}</h2>
+            <p className="mute" style={{ fontSize: 13, marginTop: 2 }}>
+              {!driveConfigured ? tr('사진 {0}장', all.length)
+                : !connected ? tr('사진 {0}장 · 아직 이 기기에만 있습니다', all.length)
+                : waiting ? tr('{0}장 Drive에 백업됨 · {1}장 올리는 중', backed, waiting)
+                : tr('{0}장 모두 Drive에 백업됨', backed)}
+            </p>
+          </div>
+          <label className={`btn btn-quiet${busy ? ' is-busy' : ''}`}>
+            <Images size={16} />{busy ? tr('정리하는 중') : tr('한꺼번에 올리기')}
+            <input type="file" accept="image/*" multiple hidden disabled={busy} onChange={(e) => { addByDate(e.target.files); e.target.value = '' }} />
+          </label>
+        </div>
+        <p className="hint">{tr('여러 장을 고르면 찍은 날짜를 읽어 그 날의 기록에 나눠 넣습니다.')}</p>
+        {driveConfigured && !connected && (
+          <div className="photo-cta">
+            <CloudOff size={18} />
+            <span className="grow">{tr('Drive에 연결하면 사진이 내 Google Drive에 백업되어, 폰을 바꾸거나 브라우저 데이터를 지워도 남습니다.')}</span>
+            <button className="btn btn-primary" onClick={() => connectDrive().catch((e) => toast((e as Error).message))}>{tr('Drive에 연결')}</button>
+          </div>
+        )}
+        {connected && shared && <p className="hint">{tr('함께 편집하는 여행이라 동행도 이 사진들을 볼 수 있습니다. 동행이 올린 사진도 여기에 모입니다.')}</p>}
+      </section>
+
       {trip.days.map((d, i) => {
         const j = trip.journal[d.date] ?? { text: '', photos: [] }
         const stops = d.items.map((p) => p.name).join(' → ')
@@ -54,7 +122,6 @@ export default function JournalTab({ trip }: { trip: Trip }) {
           </section>
         )
       })}
-      <p className="hint" style={{ padding: '4px 24px 0' }}>{tr('사진은 이 기기에만 저장됩니다. 링크 공유와 파일 저장에는 글만 담깁니다.')}</p>
     </>
   )
 }

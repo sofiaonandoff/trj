@@ -55,6 +55,7 @@ export function toYouTube(t: Trip) {
     const stops = [...flightLine(t, d.date).map((l) => `✈ ${l}`), ...d.items.map((p) => `${p.time ? `${p.time} ` : ''}${p.name}`)]
     out.push(stops.join('\n') || tr('자유 일정'), '')
   })
-  out.push(tr('#{0}여행 #{1} #여행브이로그', t.city.replace(/\s/g, ''), t.city.replace(/\s/g, '')))
+  const cities = [...new Set((t.legs ?? [t]).map((l) => l.city.replace(/\s/g, '')))]
+  out.push([...cities.map((c) => tr('#{0}여행', c)), ...cities.map((c) => `#${c}`), tr('#여행브이로그')].join(' '))
   return out.join('\n')
 }
