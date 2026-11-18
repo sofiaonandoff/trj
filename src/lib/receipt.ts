@@ -1,4 +1,4 @@
-import { tr } from '../i18n'
+import { lang, tr } from '../i18n'
 import type { Category, ExpenseCategory, Flight } from '../types'
 import { AIRLINES, AIRPORTS, airportByCity } from '../data/airports'
 import { isComplete, parseFlightText } from './flight'
@@ -26,6 +26,20 @@ export interface Reading {
   flights: Flight[]
   /** 숙소 예약 화면이면 체크인·체크아웃 */
   stay?: { checkIn?: string; checkOut?: string; inTime?: string; outTime?: string; address?: string; city?: string; host?: string; room?: string }
+  /** 투어·액티비티 바우처(GetYourGuide, Klook, KKday 등)면 만나는 곳과 안내 */
+  tour?: TourInfo
+}
+
+export interface TourInfo {
+  /** 다른 언어로 적힌 투어 이름 (한국어 화면이면 영어 이름) */
+  alt?: string
+  option?: string
+  /** 미팅 포인트 주소 */
+  address?: string
+  /** 미팅 포인트 안내 (어디서 만나는지, 몇 분 전에 오라는지) */
+  meeting?: string
+  /** 소요 시간(분) */
+  duration?: number
 }
 
 const IN = /체크\s*인|check[\s-]*in|入住|チェックイン|เช็คอิน/i
@@ -254,10 +268,12 @@ export function pickTripDate(text: string, days: string[]): string | undefined {
 }
 
 export function findTime(text: string): string | undefined {
-  const m = text.match(/(오전|오후|午前|午後)?\s*(?<!\d)([01]?\d|2[0-3])\s*:\s*([0-5]\d)(?:\s*:\s*[0-5]\d)?\s*(AM|PM|am|pm)?/)
+  // 오전/오후·AM/PM이 붙은 시각을 먼저 믿는다 (오후가 '2%'처럼 깨져 읽힌 '1:30' 대신 'at 1:30 PM')
+  const all = [...text.matchAll(/(오전|오후|午前|午後)?\s*(?<!\d)([01]?\d|2[0-3])\s*:\s*([0-5]\d)(?:\s*:\s*[0-5]\d)?\s*(AM|PM|am|pm|A\.M\.|P\.M\.)?/g)]
+  const m = all.find((x) => x[1] || x[4]) ?? all[0]
   if (!m) return undefined
   let h = Number(m[2])
-  const ap = (m[4] ?? m[1])?.toLowerCase()
+  const ap = (m[4] ?? m[1])?.toLowerCase().replace(/\./g, '')
   if ((ap === 'pm' || ap === '오후' || ap === '午後') && h < 12) h += 12
   if ((ap === 'am' || ap === '오전' || ap === '午前') && h === 12) h = 0
   return `${pad(h)}:${m[3]}`
@@ -484,6 +500,63 @@ export function stayOf(lines: string[], days: string[]): Reading['stay'] {
   return { ...d, address: info.address, city: info.city, host: info.host }
 }
 
+/** 투어·액티비티 바우처 */
+const TOUR = /get\s*your\s*guide|getyourguide|\bGYG[A-Z0-9]{6,}|klook|kkday|viator|마이리얼트립|와그|미팅\s*포인트|meeting\s*point|집합\s*(장소|시간)|만나는\s*곳|\btour\b|투어|액티비티|activity|체험|excursion|cruise|크루즈/i
+const OUTDOOR = /kayak|카약|hike|hiking|trek|하이킹|트레킹|snorkel|스노클|dive|diving|다이빙|cruise|크루즈|whale|고래|seal|물개|dolphin|돌고래|national\s*park|국립공원|glacier|빙하|rafting|래프팅|surf|서핑|horse|승마|safari|사파리|mountain|산행|bike|자전거/i
+const MEET = /^\s*(?:\S{0,3}\s*)?(미팅\s*포인트|meeting\s*point|집합\s*장소|만나는\s*곳|pick-?\s*up\s*(point|location)?|픽업\s*(장소|위치)?)\s*[:：]?\s*/i
+/** 줄이 나뉘어 OCR된 주소의 흔한 오타 */
+const fixAddress = (a: string) => a.replace(/\bZ\W?a?aland\b|Z\S{0,2}aland\b/i, 'Zealand').replace(/\s{2,}.*$/, '').replace(/^[^\p{L}\p{N}]+/u, '').trim()
+
+/**
+ * 투어·액티비티 바우처를 읽는다.
+ *   GYG32LV5GNAQ / 카이코우라: 물개 관람 페달 카약 투어 / Kaikoura: Seal-Watching Pedal Kayak Tour / 옵션 (Seal Kayak tour)
+ *   2026년 12월 9일 수 오후 1:30 / 미팅 포인트 18 Beach Road, Kaikōura 7300, New Zealand / 블랙 래빗 피자 건너편에서 만나요 …
+ */
+export function readTour(lines: string[]): { name?: string; code?: string; info: TourInfo } {
+  // 오른쪽 칸(지도 글씨, QR 옆 글씨)은 두 칸 넘게 띄어져 읽히므로 왼쪽 칸만 쓴다
+  const clean = lines.map((l) => l.replace(/[|_~=*#<>]+/g, ' ').trim().split(/\s{3,}/)[0].replace(/\s+/g, ' ').trim())
+  // 예약번호: 항목이 없어도 맨 위의 영문·숫자가 섞인 긴 낱말 (GetYourGuide의 GYG…)
+  const gyg = lines.join(' ').match(/\bGYG[A-Z0-9]{6,14}\b/)?.[0]
+  const loose = lines.slice(0, 6).flatMap((l) => l.split(/\s+/)).find((w) => /^(?=[A-Z0-9]*\d)(?=[A-Z0-9]*[A-Z])[A-Z0-9]{8,16}$/.test(w))
+  const code = gyg ?? loose
+  // 투어 이름: '투어·tour·체험…'이 든 앞쪽 줄. 한국어 화면이면 한글 줄, 아니면 영어 줄을 이름으로
+  const titles = clean.slice(0, 14).map((l) => l.replace(/\b[A-Z0-9]{8,16}\b/g, '').replace(/\d+\s*\/\s*\d+\s*(페이지|page)/i, '').trim())
+    .filter((l) => l.length >= 6 && l.length <= 70 && /tour|투어|체험|activity|액티비티|cruise|크루즈|ticket|입장권|pass|class|클래스|kayak|카약|excursion/i.test(l) && !/^\(|옵션|option/i.test(l) && !MEET.test(l))
+    // 한글 이름 앞에 붙어 읽힌 로고 글씨(GET YOUR GUIDE → 'sSUIDE')는 뗀다
+    .map((l) => (/[가-힣]/.test(l) ? l.slice(l.search(/[가-힣]/)) : l).replace(/\s*:\s*/, ': ').replace(/^[^\p{L}\p{N}]+/u, '').trim())
+  const ko = titles.find((l) => /[가-힣]/.test(l))
+  const en = titles.find((l) => !/[가-힣]/.test(l))
+  const name = lang === 'ko' ? ko ?? en : en ?? ko
+  const alt = name === ko ? en : ko
+  const option = clean.map((l) => l.match(/(?:옵션|option)?\s*\(([^()]{3,40})\)\s*$/i)).find((m) => m && /tour|투어|option|옵션|kayak|카약|class|코스|course|ticket|권/i.test(m[1]))?.[1]
+  // 미팅 포인트: 항목 다음 줄(또는 같은 줄)부터 한글 안내 문장이 나오기 전까지가 주소, 그 뒤 몇 줄이 안내
+  let address: string | undefined, meeting: string | undefined
+  const mi = clean.findIndex((l) => MEET.test(l))
+  if (mi >= 0) {
+    const rest = [clean[mi].replace(MEET, ''), ...clean.slice(mi + 1, mi + 9)].filter(Boolean)
+    let k = rest.findIndex((l) => /[가-힣]{2,}/.test(l))
+    if (k < 0) k = Math.min(rest.length, 3)
+    const addrLines = rest.slice(0, Math.min(k, 3))
+    if (addrLines.length) {
+      const joined = addrLines.join(' ')
+      // 우편번호까지가 주소 (그 뒤에 섞여 읽힌 지도 글씨는 버린다). 나라 이름은 따로 찾아 붙인다
+      const upto = joined.match(/^.*?,[^,]*?\b\d{4,6}\b/)?.[0] ?? addrLines[0]
+      const country = /zealand/i.test(fixAddress(joined)) ? 'New Zealand' : fixAddress(joined).match(/australia|japan|south\s*korea|korea|thailand|vietnam|united\s*states|usa|united\s*kingdom|france|italy|spain|germany|switzerland|singapore|taiwan|indonesia|philippines|malaysia/i)?.[0]
+      address = fixAddress(upto.replace(/,\s*$/, '')) + (country && !upto.toLowerCase().includes(country.toLowerCase().split(/\s+/)[0]) ? `, ${country.replace(/\s+/, ' ')}` : '')
+    }
+    let guide = rest.slice(k, k + 5).filter((l) => /[가-힣a-z]{2,}/i.test(l) && !/^(google|map data)/i.test(l))
+    // 문장이 끝나는 마지막 줄까지만 (그 아래는 지도 글씨)
+    const last = guide.map((l) => /[.!요다]\s*$/.test(l)).lastIndexOf(true)
+    if (last >= 0) guide = guide.slice(0, last + 1)
+    // OCR이 깨뜨린 낱말('{Ct2t', '2fap')은 뺀다
+    meeting = guide.join(' ').split(' ').filter((w) => !/[{}]|^(?=\S*\d)(?=\S*[a-z])\S{2,6}$/i.test(w) || /^\d+(분|시|시간|min|am|pm)/i.test(w)).join(' ').replace(/\s+/g, ' ').trim() || undefined
+  }
+  // 소요 시간: "소요 시간 3시간", "Duration 2.5 hours"
+  const dur = clean.join(' ').match(/(?:소요\s*시간|duration|진행\s*시간)\s*[:：]?\s*(\d+(?:\.\d+)?)\s*(시간|hours?|hrs?|분|min)/i)
+  const duration = dur ? Math.round(Number(dur[1]) * (/분|min/i.test(dur[2]) ? 1 : 60)) : undefined
+  return { name, code, info: { alt, option, address, meeting, duration } }
+}
+
 const PROMO = /book another|more hotels|flight to\s|you might also|recommended for you|similar (?:hotels|properties)|함께 (?:예약|보면)|다른 숙소|추천 (?:숙소|항공)|항공권 할인|최대\s*\d+%\s*할인|up to \d+% off/i
 
 export function readText(all: OcrLine[], days: string[], tripCurrency: string): Reading {
@@ -499,7 +572,11 @@ export function readText(all: OcrLine[], days: string[], tripCurrency: string): 
   let flights: Flight[] = hotelPage ? [] : parseFlightText(text, year).filter(isComplete)
   if (!flights.length && !hotelPage) { const t = flightFromTable(lines.filter((l) => !CHROME.test(l.text)).map((l) => l.text).join('\n'), days); if (t) flights = [t] }
   flights = flights.map((f, i) => ({ ...f, id: `ocr${Date.now()}${i}` }))
-  const kind = flights.length ? { cat: 'sight' as Category, exp: 'move' as ExpenseCategory, costOnly: true } : KINDS.find((k) => k.re.test(text))
+  // 투어·액티비티 바우처: 숙소(체크아웃 있는) 화면이 아니면, 피자집 안내 같은 낱말보다 먼저 본다
+  const tourPage = !flights.length && !hotelPage && TOUR.test(text)
+  const kind = flights.length ? { cat: 'sight' as Category, exp: 'move' as ExpenseCategory, costOnly: true }
+    : tourPage ? { cat: (OUTDOOR.test(text) ? 'nature' : 'sight') as Category, exp: 'play' as ExpenseCategory, costOnly: false }
+    : KINDS.find((k) => k.re.test(text))
   // 휴대폰 상태 표시줄(시계·배터리)과 브라우저 주소창·메뉴 줄은 내용이 아니다.
   // 맨 위 줄이 시각으로 시작하면 상태 표시줄로 본다 ("3:309 all T EX"처럼 깨져 읽혀도)
   const maxTop = Math.max(1, ...lines.map((l) => l.top))
@@ -519,9 +596,10 @@ export function readText(all: OcrLine[], days: string[], tripCurrency: string): 
   const hotelLine = body.map((l) => l.text).find((t) => /hotel|resort|\binn\b|suites?\b|hostel|apartments?\b|호텔|리조트|ホテル/i.test(t) && !/hotels?\s+in\b|book another|호텔\s*더/i.test(t) && t.length <= 48)
   const stayName = kind?.cat === 'stay' ? info.name ?? hotelLine?.replace(/^[^\p{L}\p{N}]+/u, '').trim() ?? (info.city ? tr('{0} 숙소', info.city) : undefined) : undefined
   const stay = kind?.cat === 'stay' ? stayOf(body.map((l) => l.text), days) : undefined
+  const tour = tourPage ? readTour(body.map((l) => l.text)) : undefined
   return {
-    name: stayName ?? (name && fixBrand(name)),
-    code: findCode(text),
+    name: stayName ?? tour?.name ?? (name && fixBrand(name)),
+    code: findCode(text) ?? tour?.code,
     date: pickTripDate(text, days),
     time: findTime(lines.filter((l) => /시간|시각|time|체크\s*인|check[\s-]*in|입장|時/i.test(l.text)).map((l) => l.text).join('\n')) ?? findTime(body.map((l) => l.text).join('\n')),
     amount,
@@ -531,5 +609,6 @@ export function readText(all: OcrLine[], days: string[], tripCurrency: string): 
     costOnly: Boolean(kind?.costOnly),
     flights,
     stay: stay || info.city ? { ...stay, city: stay?.city ?? info.city, room: info.room } : undefined,
+    tour: tour?.info,
   }
 }

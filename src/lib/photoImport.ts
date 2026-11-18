@@ -173,6 +173,18 @@ export async function readTripPhoto(file: File, trip: Trip, current: string, onS
       if (hit) { where = { lat: hit.lat, lng: hit.lng }; if (q !== city) foundAddress = hit.detail; break }
     }
   }
+  // 투어·액티비티 바우처: 미팅 포인트 주소로 위치를 찾는다. 번지가 잘못 읽혔을 수 있어 번지를 뺀 주소로도 찾는다
+  const tour = r.tour
+  if (tour && !where) {
+    const a = tour.address
+    const tries = a ? [a, a.replace(/^\s*\d+[\w/-]*\s+/, ''), a.split(',').slice(0, 2).join(',').replace(/^\s*\d+[\w/-]*\s+/, '')] : []
+    for (const q of [...new Set(tries)]) {
+      const hits = (await searchPlaces(q, near).catch(() => [])).filter((x) => !x.airport)
+      // 주소에 도시·우편번호까지 있으면 여행 도시와 멀어도 믿는다 (다른 도시의 투어)
+      const hit = /,/.test(q) ? hits[0] : hits.find((x) => km(near, x) <= 150)
+      if (hit) { where = { lat: hit.lat, lng: hit.lng }; break }
+    }
+  }
   if (!r.costOnly && !where) {
     if (gps) {
       where = gps
@@ -198,6 +210,22 @@ export async function readTripPhoto(file: File, trip: Trip, current: string, onS
         address: stayAddress ?? choices?.[0]?.address ?? foundAddress,
         note: [r.stay.room && tr('객실 {0}', r.stay.room), r.stay.host && tr('호스트 {0}', r.stay.host)].filter(Boolean).join(' · ') || undefined,
       },
+    })
+    return out
+  }
+  if (tour && name) {
+    // 위치를 못 찾았어도 투어는 일정에 넣는다 (그 날 머무는 도시에 두고, 미팅 포인트는 메모로)
+    const loc = where ?? { lat: near.lat, lng: near.lng }
+    const note = [
+      r.code && tr('예약번호 {0}', r.code),
+      tour.option && tr('옵션 {0}', tour.option),
+      tour.address && tr('미팅 포인트 {0}', tour.address),
+      tour.meeting,
+      tour.alt,
+    ].filter(Boolean).join('\n')
+    out.push({
+      date, dateFrom: from, expense,
+      place: { id: uid(), name, ...loc, category: r.category, note: note || undefined, time: r.time, duration: tour.duration ?? 120 },
     })
     return out
   }
