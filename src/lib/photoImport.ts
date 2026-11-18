@@ -3,7 +3,7 @@ import type { Expense, Flight, Place, Stay, Trip } from '../types'
 import { loadWorldAirports } from '../data/airports'
 import { reverseGeocode, searchPlaces } from './geocode'
 import { legOf } from './legs'
-import { ocrPasses, recognize, recognizeBand } from './ocr'
+import { ocrPasses, recognize, recognizeBand, signWords } from './ocr'
 import { readExif } from './photos'
 import { readText, stayLabelLine, stayOf } from './receipt'
 import { putStay, removeStay } from '../store'
@@ -15,6 +15,9 @@ import { addDays, fromMin, km, toMin, travelMin, uid } from './util'
  * - 위치는 사진의 GPS → 가게 이름 검색 순으로 찾는다. 글자가 없는 풍경 사진은 GPS 위치의 장소 이름을 쓴다.
  * 날짜는 사진 속 글자 → 사진을 찍은 날 → 지금 보고 있는 날 순으로 정하고, 다른 날의 사진이면 그 날로 옮겨 넣는다.
  */
+
+/** 간판 읽기에서 버리는 낱말 (화면 단추·흔한 영어) */
+const SIGN_NOISE = /^(view|book|booking|details?|return|home|room|rooms|hotel|hotels|more|flight|next|done|close|open|save|share|confirm|check|sale|from|with|your|this|that|the)$/i
 
 export type DateFrom = 'image' | 'photo' | 'current'
 
@@ -29,7 +32,11 @@ export interface Draft {
   stay?: Stay
   /** 위치를 찾지 못해 일정에는 넣지 않은 경우 */
   noPlace?: boolean
+  /** 같은 이름의 숙소가 여럿이면 고를 수 있는 다른 후보 (예: 시드니의 Quest 호텔들) */
+  choices?: StayChoice[]
 }
+
+export interface StayChoice { name: string; lat: number; lng: number; address?: string }
 
 /** 날짜 정하기: 여행 기간 안에 드는 것만 믿는다 */
 export function pickDate(days: string[], imageDate: string | undefined, photoDate: string | undefined, current: string): { date: string; from: DateFrom } {
@@ -114,19 +121,53 @@ export async function readTripPhoto(file: File, trip: Trip, current: string, onS
     for (const q of tries) {
       const hits = (await searchPlaces(q, around).catch(() => [])).filter((x) => !x.airport)
       // 도시 이름까지 맞춰 찾은 결과는 여행 도시와 멀어도 믿는다 (다른 도시 숙소). 주소만이면 가까운 곳만
-      const hit = q === stayAddress && r.stay?.city ? hits.find((x) => km(around, x) <= 3000) : hits.find((x) => km(around, x) <= 150)
+      const hit = q === stayAddress && r.stay?.city ? hits[0] : hits.find((x) => km(around, x) <= 150)
       if (hit) { where = { lat: hit.lat, lng: hit.lng }; break }
     }
   }
-  // 숙소인데 주소가 없으면: 숙소 이름(도시로 지은 이름이 아닐 때) → 화면의 지명(도시) 순으로 지도에서 찾는다
+  // 숙소인데 주소가 없으면: 숙소 이름(도시로 지은 이름이 아닐 때) → 사진 속 간판 이름 → 화면의 지명(도시) 순으로 지도에서 찾는다
+  let choices: StayChoice[] | undefined
+  /** 숙소 이름으로 지도에서 찾았으면 그 주소 */
+  let foundAddress: string | undefined
   if (r.category === 'stay' && !where && !gps) {
     const around = legOf(trip, r.stay?.checkIn ?? date)
     const city = r.stay?.city
-    const own = name && !(city && name === tr('{0} 숙소', city)) ? name : undefined
-    for (const q of [own && city ? `${own}, ${city}` : own, city].filter(Boolean) as string[]) {
+    const generated = !name || Boolean(city && name === tr('{0} 숙소', city))
+    // 화면 글에 숙소 이름이 없으면 사진 속 간판·로고(예: 호텔 건물의 'QUEST')를 읽어 그 이름의 숙소를 그 도시에서 찾는다
+    if (generated && !pdf) {
+      onStage?.(tr('사진 속 간판을 읽는 중'))
+      const brands = [...new Set((await signWords(file).catch(() => [] as string[]))
+        .map((w) => w.replace(/[^A-Za-z&' -]/g, ' ').replace(/\s+/g, ' ').trim())
+        .filter((w) => /[A-Za-z]{4,}/.test(w) && !SIGN_NOISE.test(w)))].slice(0, 3)
+      for (const brand of brands) {
+        const seen = new Set<string>()
+        const hits: StayChoice[] = []
+        for (const q of [`${brand} ${city ?? ''}`.trim(), `${brand} hotel ${city ?? ''}`.trim()]) {
+          for (const x of await searchPlaces(q, around).catch(() => [])) {
+            if (x.airport || !x.name.toLowerCase().includes(brand.toLowerCase()) || seen.has(x.name)) continue
+            // 도시 이름까지 넣어 찾았으면 여행 도시와 멀어도 믿는다. 도시를 모르면 가까운 곳만
+            if (!city && km(around, x) > 150) continue
+            seen.add(x.name); hits.push({ name: x.name, lat: x.lat, lng: x.lng, address: x.detail })
+          }
+          if (hits.length) break
+        }
+        if (hits.length) {
+          name = hits[0].name
+          where = { lat: hits[0].lat, lng: hits[0].lng }
+          if (hits.length > 1) choices = hits.slice(0, 6)
+          break
+        }
+      }
+    }
+    const own = !where && name && !(city && name === tr('{0} 숙소', city)) ? name : undefined
+    // 이름에 도시가 이미 있으면(Quest North Sydney) 그대로, 없으면 도시를 붙여 찾는다
+    const withCity = own && city && !own.toLowerCase().includes(city.toLowerCase()) ? `${own}, ${city}` : own
+    for (const q of (where ? [] : [withCity, own !== withCity ? own : undefined, city]).filter(Boolean) as string[]) {
       const hits = (await searchPlaces(q, around).catch(() => [])).filter((x) => !x.airport)
-      const hit = q === city || city ? hits.find((x) => km(around, x) <= 3000) : hits.find((x) => km(around, x) <= 80)
-      if (hit) { where = { lat: hit.lat, lng: hit.lng }; break }
+      // 숙소 이름으로 찾았으면 이름이 맞는 결과를 먼저
+      const named = q !== city && own ? hits.find((x) => x.name.toLowerCase().includes(own.toLowerCase().split(' ')[0])) : undefined
+      const hit = named ?? (city ? hits[0] : hits.find((x) => km(around, x) <= 80))
+      if (hit) { where = { lat: hit.lat, lng: hit.lng }; if (q !== city) foundAddress = hit.detail; break }
     }
   }
   if (!r.costOnly && !where) {
@@ -148,9 +189,10 @@ export async function readTripPhoto(file: File, trip: Trip, current: string, onS
     const checkOut = r.stay.checkOut && r.stay.checkOut > checkIn ? r.stay.checkOut : addDays(checkIn, 1)
     out.push({
       date: checkIn, dateFrom: 'image', expense: expense && { ...expense, category: 'stay', date: checkIn },
+      choices,
       stay: {
         id: uid(), name, ...loc, checkIn, checkOut, inTime: r.stay.inTime, outTime: r.stay.outTime, code: r.code,
-        address: stayAddress,
+        address: stayAddress ?? choices?.[0]?.address ?? foundAddress,
         note: [r.stay.room && tr('객실 {0}', r.stay.room), r.stay.host && tr('호스트 {0}', r.stay.host)].filter(Boolean).join(' · ') || undefined,
       },
     })
@@ -179,6 +221,8 @@ export interface Applied {
   noPlace?: boolean
   stayId?: string
   stayAdded?: boolean
+  /** 같은 이름 숙소 후보 (다른 지점으로 바꿀 수 있게) */
+  choices?: StayChoice[]
   checkOut?: string
   /** 이미 넣은 것과 같아 다시 넣지 않았다 */
   duplicate?: boolean
@@ -204,6 +248,7 @@ export function applyDraft(t: Trip, d: Draft, putFlight: (t: Trip, f: Flight) =>
     }
     const s = t.stays!.find((x) => x.id === res.stayId)!
     res.title = s.name
+    if (d.choices && res.stayAdded) res.choices = d.choices
     res.checkOut = s.checkOut
     if (d.expense) res.amount = { value: d.expense.amount, currency: d.expense.currency }
     return res
@@ -247,3 +292,13 @@ export function undoApplied(t: Trip, a: Applied) {
 }
 
 export const dateFromLabel = (from: DateFrom) => (from === 'image' ? tr('사진 속 날짜') : from === 'photo' ? tr('찍은 날짜') : tr('보고 있던 날'))
+
+/** 숙소를 다른 후보(같은 이름의 다른 지점)로 바꾼다 */
+export function switchStay(t: Trip, stayId: string, c: StayChoice) {
+  const s = t.stays?.find((x) => x.id === stayId)
+  if (!s) return
+  s.name = c.name; s.lat = c.lat; s.lng = c.lng
+  if (c.address) s.address = c.address
+  const e = s.expenseId ? t.expenses.find((x) => x.id === s.expenseId) : undefined
+  if (e) e.title = c.name
+}

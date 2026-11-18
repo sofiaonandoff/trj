@@ -1,7 +1,7 @@
 import { tr } from '../i18n'
 import { BedDouble, CalendarCheck, Loader2, Plane, Receipt, Undo2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { applyDraft, dateFromLabel, readTripPhoto, undoApplied, type Applied } from '../lib/photoImport'
+import { applyDraft, dateFromLabel, readTripPhoto, switchStay, undoApplied, type Applied, type StayChoice } from '../lib/photoImport'
 import { md, won } from '../lib/util'
 import { putFlight, useStore } from '../store'
 import type { Trip } from '../types'
@@ -56,6 +56,12 @@ export default function PhotoImport({ trip, files, current, onClose, onGo }: { t
     mutate(trip.id, (t) => undoApplied(t, a))
     setJobs((js) => js.map((j) => (j.id === jobId ? { ...j, results: j.results.map((r, i) => (i === k ? { ...r, undone: true } : r)) } : j)))
   }
+  const pick = (jobId: number, k: number, c: StayChoice) => {
+    const a = jobs.find((j) => j.id === jobId)?.results[k]
+    if (!a?.stayId) return
+    mutate(trip.id, (t) => switchStay(t, a.stayId!, c))
+    setJobs((js) => js.map((j) => (j.id === jobId ? { ...j, results: j.results.map((r, i) => (i === k ? { ...r, title: c.name } : r)) } : j)))
+  }
   const busy = jobs.some((j) => j.status === 'reading')
   const moved = jobs.flatMap((j) => j.results).find((r) => !r.undone && !r.flightId && r.date !== current && dayNo(r.date) > 0)
 
@@ -82,6 +88,16 @@ export default function PhotoImport({ trip, files, current, onClose, onGo }: { t
                     </small>
                     {!r.undone && r.date !== current && !r.flightId && !r.stayId && dayNo(r.date) > 0 && (
                       <small className="moved"><CalendarCheck size={13} />{tr('{0}에 맞춰 {1}일차에 넣었습니다', dateFromLabel(r.dateFrom), dayNo(r.date))}</small>
+                    )}
+                    {!r.undone && r.stayId && r.choices && r.choices.length > 1 && (
+                      <span className="choice-row">
+                        <small className="mute">{tr('같은 이름의 숙소가 여럿입니다. 맞는 곳을 고르세요')}</small>
+                        <span className="chips">
+                          {r.choices.map((c) => (
+                            <button key={c.name} className="chip" aria-pressed={c.name === r.title} onClick={() => pick(j.id, k, c)}>{c.name}</button>
+                          ))}
+                        </span>
+                      </span>
                     )}
                     {r.noPlace && <small className="mute">{tr('위치를 찾지 못해 예산에만 기록했습니다')}</small>}
                     {r.duplicate && <small className="mute">{tr('이미 들어 있어 다시 넣지 않았습니다')}</small>}

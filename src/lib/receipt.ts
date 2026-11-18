@@ -78,6 +78,13 @@ export function findStayDates(text: string, days: string[]): Reading['stay'] {
     for (let i = 0; i < lines.length; i++) {
       const ds = [...new Set(findDates(lines[i], year))].sort()
       if (ds.length !== 2 || ds[1] <= ds[0] || dateRange(ds[0], ds[1]).length > 32) continue
+      // 같은 줄에 시각이 있으면: "13 Dec 14:00 - 14 Dec" → 구분 기호 앞은 체크인, 뒤는 체크아웃
+      const halves = lines[i].split(/\s+[-~–—→]\s+|\s*→\s*/)
+      if (halves.length === 2 && /\d\s*:\s*\d\d/.test(lines[i])) {
+        const tIn = /\d\s*:\s*\d\d/.test(halves[0]) ? stayTime(halves[0].replace(/\d{4}/g, ''), true) : undefined
+        const tOut = /\d\s*:\s*\d\d/.test(halves[1]) ? stayTime(halves[1].replace(/\d{4}/g, ''), false) : undefined
+        return { checkIn: ds[0], checkOut: ds[1], inTime: tIn, outTime: tOut }
+      }
       const near = [lines[i + 1] ?? '', lines[i - 1] ?? ''].find((l) => /\d\s*[:.]\s*\d\d/.test(l) && !findDates(l, year).length) ?? ''
       const cs = columns(near)
       const inCol = cs.find((c) => /\d\s*[:.]\s*\d\d/.test(c) && !OUT.test(c))
@@ -115,6 +122,26 @@ export const stayLabelLine = (lines: OcrLine[]) => lines.find((l) => IN.test(l.t
 export function findStayInfo(lines: string[]): { name?: string; city?: string; address?: string; host?: string; room?: string } {
   const out: { name?: string; city?: string; address?: string; host?: string; room?: string } = {}
   const clean = (s: string) => s.replace(/^[^\p{L}\p{N}]+/u, '').replace(/\s+/g, ' ').trim()
+  // 예약 목록의 숙소 카드 (아고다 일정 등): 날짜 두 개가 있는 줄 바로 위가 숙소 이름, 바로 아래가 도시
+  //   "Confirmed / Quest North Sydney / 13 Dec 14:00 - 14 Dec / Sydney"
+  const year = new Date().getFullYear()
+  const di = lines.findIndex((l) => new Set(findDates(l, year)).size === 2 && !IN.test(l) && !OUT.test(l))
+  if (di > 0) {
+    const skip = /confirmed|확정|예약\s*완료|booking\s*id|^\W*id\b|체크|check|\d{6,}/i
+    const tidy = (l: string) => {
+      // 사진 옆 글자 찌꺼기를 떼고, 칸이 나뉘어 있으면 가장 긴 글자 칸을 쓴다
+      const cols = l.split(/\s{2,}/).map((x) => x.trim()).filter((x) => /\p{L}{2,}/u.test(x))
+      const best = cols.sort((a, b) => b.length - a.length)[0] ?? ''
+      return best.replace(/^[^\p{L}\p{N}]+/u, '').replace(/^(?:[a-z]{1,4}\s+)+(?=[\p{Lu}가-힣])/u, '').trim()
+    }
+    // 바로 위 줄만 본다 (문장·항목 이름은 숙소 이름이 아니다)
+    const prev = lines[di - 1] ?? ''
+    const nm = !skip.test(prev) ? tidy(prev) : ''
+    const sentence = /[.!?]$|\b(you|your|will|the next|in the|we)\b/i.test(nm) || nm.split(' ').length > 7
+    if (nm.length >= 4 && nm.length <= 60 && !sentence && /\p{L}{3,}/u.test(nm)) out.name = nm
+    const nx = tidy(lines[di + 1] ?? '')
+    if (/^[\p{Lu}가-힣][\p{L} .'-]{1,30}$/u.test(nx) && nx.split(' ').length <= 3 && !skip.test(nx) && !/room|night|guest|adult|박|객실/i.test(nx)) out.city = nx
+  }
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i].trim()
     // 'OO의 숙소', OCR이 '의'를 '2]', 'al|', 'l|'로 읽은 경우도
@@ -238,7 +265,7 @@ export function findTime(text: string): string | undefined {
 
 /** 예약번호·확인번호·주문번호 (JOMO parse.ts에서 가져와 넓힘) */
 export function findCode(text: string): string | undefined {
-  const re = /(예약\s*번호|확인\s*번호|예약\s*코드|승인\s*번호|주문\s*번호|예매\s*번호|booking\s*(?:reference|ref\.?|number|no\.?|id|code)|confirmation\s*(?:number|no\.?|code|#)|reservation\s*(?:number|no\.?|code|id)|record\s*locator|PNR|order\s*(?:number|no\.?|id|#)|itinerary\s*(?:number|no\.?)|予約番号|受付番号)\s*[:：#.]?\s*([A-Z0-9][A-Z0-9-]{3,24})/i
+  const re = /(예약\s*번호|확인\s*번호|예약\s*코드|승인\s*번호|주문\s*번호|예매\s*번호|booking\s*(?:reference|ref\.?|number|no\.?|id|code)|confirmation\s*(?:number|no\.?|code|#)|reservation\s*(?:number|no\.?|code|id)|record\s*locator|PNR|order\s*(?:number|no\.?|id|#)|(?<![A-Za-z])ID(?=\s*[:：#]\s*\d{6})|itinerary\s*(?:number|no\.?)|予約番号|受付番号)\s*[:：#.]?\s*([A-Z0-9][A-Z0-9-]{3,24})/i
   const m = re.exec(text)
   return m ? m[2].toUpperCase() : undefined
 }
@@ -282,7 +309,7 @@ export function findTotal(lines: string[]): number | undefined {
 }
 
 const KINDS: { re: RegExp; cat: Category; exp: ExpenseCategory; costOnly?: boolean }[] = [
-  { re: /hotel|hostel|resort|check[\s-]?in|check[\s-]?out|호텔|숙박|숙소|체크\s*인|호스트|에어비앤비|리조트|게스트하우스|ホテル|旅館|โรงแรม|airbnb|agoda|booking\.com|게스트\s*\d+\s*명|\d+\s*guests?\b|저택|호실|별채|펜션|민박|빌라|콘도|아파트|단독\s*주택|공동\s*주택|집\s*전체|개인실|게스트용|타운하우스|캐빈|오두막|entire\s+(home|place|rental)|guest\s*suite|guesthouse|private\s+room|room\s+in|apartment|condo|villa|cottage|cabin|bungalow|townhouse|loft/i, cat: 'stay', exp: 'stay' },
+  { re: /hotel|hostel|resort|check[\s-]?in|check[\s-]?out|\b\d+\s*(?:x\s*)?rooms?\b|add rooms|\b\d+\s*nights?\b|객실\s*\d|\d\s*박\b|호텔|숙박|숙소|체크\s*인|호스트|에어비앤비|리조트|게스트하우스|ホテル|旅館|โรงแรม|airbnb|agoda|booking\.com|게스트\s*\d+\s*명|\d+\s*guests?\b|저택|호실|별채|펜션|민박|빌라|콘도|아파트|단독\s*주택|공동\s*주택|집\s*전체|개인실|게스트용|타운하우스|캐빈|오두막|entire\s+(home|place|rental)|guest\s*suite|guesthouse|private\s+room|room\s+in|apartment|condo|villa|cottage|cabin|bungalow|townhouse|loft/i, cat: 'stay', exp: 'stay' },
   { re: /taxi|grab|bolt|uber|bts|mrt|metro|subway|railway|train|bus|ferry|택시|지하철|버스|기차|열차|교통|suica|pasmo|タクシー|電車|แท็กซี่|รถไฟ/i, cat: 'sight', exp: 'move', costOnly: true },
   { re: /cafe|café|coffee|starbucks|카페|커피|喫茶|カフェ|กาแฟ|bakery|베이커리/i, cat: 'cafe', exp: 'food' },
   { re: /restaurant|bistro|kitchen|ramen|sushi|bbq|bar\b|pub|식당|레스토랑|음식|라멘|스시|食堂|レストラン|ร้านอาหาร|food|noodle|menu|국수|교자|김밥|찌개|국밥|치킨|고기|ラーメン|うどん|そば|寿司|居酒屋|ก๋วยเตี๋ยว|phở/i, cat: 'food', exp: 'food' },
@@ -424,7 +451,8 @@ export function readText(all: OcrLine[], days: string[], tripCurrency: string): 
   const maxTop = Math.max(1, ...lines.map((l) => l.top))
   const statusBar = (l: OcrLine) => l.top <= maxTop * 0.04 && /^\s*\d{1,2}\s*[:.]?\s*\d{2}/.test(l.text) && !/[~\-–—]\s*\d{1,2}:\d{2}/.test(l.text)
   const body = lines.filter((l) => !CHROME.test(l.text) && !statusBar(l))
-  const amount = findTotal(body.map((l) => l.text))
+  // 숙소 화면에는 이름·예약번호 같은 숫자가 많아, 합계·결제 항목이 붙은 금액만 믿는다
+  const amount = findTotal(body.map((l) => l.text).filter((t) => kind?.cat !== 'stay' || (TOTAL.test(t) && !NOT_TOTAL.test(t))))
   const name = findName(body)
   // 통화 기호를 못 읽었을 때: 한글 위주면 원화, 가나가 있으면 엔화로 본다
   const hangul = (text.match(/\p{Script=Hangul}/gu) ?? []).length

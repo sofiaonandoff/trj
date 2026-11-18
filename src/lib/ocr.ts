@@ -237,3 +237,80 @@ export async function recognizeLines(file: Blob, langs: string[] | string[][], o
   const passes = Array.isArray(langs[0]) ? (langs as string[][]) : [langs as string[]]
   return (await recognize(file, passes, onProgress)).lines
 }
+
+/**
+ * 사진 속 간판·로고처럼 어두운 바탕 위의 밝은 글자를 찾아 읽는다 (예: 호텔 사진의 'QUEST' 간판).
+ * 1) 주변보다 훨씬 밝은 점만 남기고 2) 글자 크기의 덩어리를 찾아 3) 가로로 나란한 덩어리를 낱말로 묶은 뒤
+ * 4) 낱말마다 잘라 키워 한 줄 글자로 읽는다. 보통 글자(밝은 바탕의 어두운 글자)는 이미 읽었으니 다루지 않는다.
+ */
+export async function signWords(file: Blob): Promise<string[]> {
+  const bmp = await createImageBitmap(file)
+  const k = Math.min(1, 1400 / bmp.width)
+  const W = Math.round(bmp.width * k), H = Math.round(bmp.height * k)
+  const c = document.createElement('canvas')
+  c.width = W; c.height = H
+  const g = c.getContext('2d', { willReadFrequently: true })!
+  g.drawImage(bmp, 0, 0, W, H)
+  const px = g.getImageData(0, 0, W, H).data
+  const lum = new Float32Array(W * H)
+  for (let i = 0; i < W * H; i++) lum[i] = (px[i * 4] * 299 + px[i * 4 + 1] * 587 + px[i * 4 + 2] * 114) / 1000
+  // 주변 평균 (적분 영상)
+  const S = new Float64Array((W + 1) * (H + 1))
+  for (let y = 0; y < H; y++) { let row = 0; for (let x = 0; x < W; x++) { row += lum[y * W + x]; S[(y + 1) * (W + 1) + x + 1] = S[y * (W + 1) + x + 1] + row } }
+  const r = 9
+  const mean = (x: number, y: number) => {
+    const x0 = Math.max(0, x - r), y0 = Math.max(0, y - r), x1 = Math.min(W, x + r + 1), y1 = Math.min(H, y + r + 1)
+    return (S[y1 * (W + 1) + x1] - S[y0 * (W + 1) + x1] - S[y1 * (W + 1) + x0] + S[y0 * (W + 1) + x0]) / ((x1 - x0) * (y1 - y0))
+  }
+  const mask = new Uint8Array(W * H)
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const v = lum[y * W + x]; if (v > 185) { const m = mean(x, y); if (m < 165 && v - m > 55) mask[y * W + x] = 1 } }
+
+  // 덩어리 찾기
+  type Box = { x0: number; y0: number; x1: number; y1: number; n: number }
+  const seen = new Uint8Array(W * H), boxes: Box[] = [], stack: number[] = []
+  for (let i = 0; i < W * H; i++) {
+    if (!mask[i] || seen[i]) continue
+    const b: Box = { x0: W, y0: H, x1: 0, y1: 0, n: 0 }
+    stack.push(i); seen[i] = 1
+    while (stack.length) {
+      const j = stack.pop()!, x = j % W, y = (j - x) / W
+      b.n++; if (x < b.x0) b.x0 = x; if (x > b.x1) b.x1 = x; if (y < b.y0) b.y0 = y; if (y > b.y1) b.y1 = y
+      for (const q of [j - 1, j + 1, j - W, j + W]) if (q >= 0 && q < W * H && mask[q] && !seen[q] && Math.abs((q % W) - x) <= 1) { seen[q] = 1; stack.push(q) }
+    }
+    const h = b.y1 - b.y0 + 1, w = b.x1 - b.x0 + 1, fill = b.n / (w * h)
+    if (h >= 7 && h <= 70 && w >= 2 && w <= h * 1.4 && fill > 0.15 && fill < 0.92) boxes.push(b)
+  }
+  // 나란한 글자 덩어리를 낱말로 묶는다
+  boxes.sort((a, b) => a.x0 - b.x0)
+  const parent = boxes.map((_, i) => i)
+  const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])))
+  for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+    const a = boxes[i], b = boxes[j], ha = a.y1 - a.y0 + 1, hb = b.y1 - b.y0 + 1
+    if (b.x0 - a.x1 > Math.max(ha, hb) * 1.1) break
+    const cy = Math.abs((a.y0 + a.y1) / 2 - (b.y0 + b.y1) / 2)
+    if (cy < Math.min(ha, hb) * 0.45 && Math.max(ha, hb) / Math.min(ha, hb) < 1.6) parent[find(j)] = find(i)
+  }
+  const groups = new Map<number, Box[]>()
+  boxes.forEach((b, i) => { const p = find(i); groups.set(p, [...(groups.get(p) ?? []), b]) })
+  const words = [...groups.values()].filter((gs) => gs.length >= 3).slice(0, 10)
+
+  const out: string[] = []
+  for (const gs of words) {
+    const x0 = Math.min(...gs.map((b) => b.x0)), x1 = Math.max(...gs.map((b) => b.x1)), y0 = Math.min(...gs.map((b) => b.y0)), y1 = Math.max(...gs.map((b) => b.y1))
+    const pad = (y1 - y0) * 0.5
+    const sx = Math.max(0, x0 - pad) / k, sy = Math.max(0, y0 - pad) / k, sw = Math.min(W, x1 + pad) / k - sx, sh = Math.min(H, y1 + pad) / k - sy
+    const z = Math.max(1, 70 / sh)
+    const cc = document.createElement('canvas')
+    cc.width = Math.round(sw * z); cc.height = Math.round(sh * z)
+    const gg = cc.getContext('2d', { willReadFrequently: true })!
+    gg.drawImage(bmp, sx, sy, sw, sh, 0, 0, cc.width, cc.height)
+    // 밝은 글자만 검게, 나머지는 희게
+    const d = gg.getImageData(0, 0, cc.width, cc.height)
+    for (let i = 0; i < d.data.length; i += 4) { const v = (d.data[i] * 299 + d.data[i + 1] * 587 + d.data[i + 2] * 114) / 1000; d.data[i] = d.data[i + 1] = d.data[i + 2] = v > 195 ? 0 : 255 }
+    gg.putImageData(d, 0, 0)
+    const read = await readOnce(cc, ['eng'], undefined, '7').catch(() => null)
+    const t = read?.lines.map((l) => l.text).join(' ').replace(/[^A-Za-z0-9&' -]/g, '').trim()
+    if (t && /[A-Za-z]{3,}/.test(t)) out.push(t)
+  }
+  return out
+}

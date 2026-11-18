@@ -431,4 +431,6 @@ export const EN: Record<string, string> = {
   "호스트 {0}": "Host {0}",
   "{0} 숙소": "Stay in {0}",
   "객실 {0}": "Room: {0}",
+  "사진 속 간판을 읽는 중": "Reading signs in the photo",
+  "같은 이름의 숙소가 여럿입니다. 맞는 곳을 고르세요": "There are several places with this name. Pick the right one",
 }
