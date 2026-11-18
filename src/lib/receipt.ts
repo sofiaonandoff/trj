@@ -1,5 +1,7 @@
 import type { Category, ExpenseCategory, Flight } from '../types'
+import { AIRPORTS } from '../data/airports'
 import { isComplete, parseFlightText } from './flight'
+import { addDays } from './util'
 
 /**
  * 사진에서 읽은 글자(OCR)로 영수증·예약 화면·탑승권을 해석한다. AI 없이 기기 안에서만 동작한다.
@@ -134,7 +136,7 @@ const KINDS: { re: RegExp; cat: Category; exp: ExpenseCategory; costOnly?: boole
 
 /** 주소 줄: 이름으로 쓰지 않는다 */
 const ADDRESS = /\d+\s*(번?길|로|가)\b|[가-힣]+(시|구|군)\s+[가-힣]+(구|동|로|길)|\d+[\/-]\d+\s+\w+\s+(rd|road|st|street|ave|soi)\b|\b(rd|road|street|soi|moo)\b.*\d|[都道府県区市]\S*\d+[-−]\d+|丁目/i
-const HEADER = /^(예약|구매|결제|주문|booking|reservation|order|purchase|payment)?\s*(확정|확인|완료|안내|내역|confirm(?:ed|ation)?|complete[d]?|receipt|details?)\s*$|^e-?ticket(\s*receipt)?$|^your\s+(booking|order|receipt)$/i
+const HEADER = /^(?:\d{1,2}[.)]\s*)?(예약|구매|결제|주문|booking|reservation|order|purchase|payment)?\s*(확정|확인|완료|안내|내역|confirm(?:ed|ation)?|complete[d]?|receipt|details?)[\s\-—–.]*$|^e-?ticket(\s*receipt)?$|^your\s+(booking|order|receipt)$/i
 const JUNK = /receipt|tax\s*invoice|invoice|confirmation|영수증|매출|전표|\btel\b|phone|전화|사업자|\bvat\b|no\.|\bdate\b|\btime\b|cashier|\bpos\b|\btable\b|\border\b|주문|領収|レシート|ใบเสร็จ|www\.|http|@/i
 
 /** 가게·장소 이름: 위쪽에 있는 가장 큰 글자 줄 중 의미 있는 것 */
@@ -154,6 +156,40 @@ export function findName(lines: OcrLine[]): string | undefined {
   const pool = top.length ? top : good
   return pool.reduce((a, b) => (b.height > a.height * 1.15 ? b : a)).text
 }
+
+/**
+ * 항목: 값 줄로 된 항공권 화면 (예약 확인 단계, 항공사 앱):
+ *   SYD 시드니 ✈ ICN 서울/인천 / 출발일 2026-12-14(월) / 편명 TW502 / 출/도착 시간 12:15~21:15
+ * parseFlightText는 편명 뒤의 글자만 보므로, 편명 앞에 나오는 구간·날짜를 화면 전체에서 채운다.
+ */
+export function flightFromTable(text: string, days: string[]): Flight | null {
+  const year = Number((days[0] ?? '').slice(0, 4)) || new Date().getFullYear()
+  const no = text.match(/(?:편명|항공편|flight\s*(?:no\.?|number)?|便名)\s*[:：]?\s*([A-Z0-9]{2})\s?(\d{1,4})\b/i)
+  if (!no) return null
+  const codes = new Set(AIRPORTS.map((a) => a.code))
+  const lines = text.split('\n')
+  // 출발·도착 공항: 아는 공항 코드 두 개가 나오는 첫 줄
+  let from: string | undefined, to: string | undefined
+  for (const l of lines) {
+    const iata = [...l.matchAll(/\b([A-Z]{3})\b/g)].map((m) => m[1]).filter((c) => codes.has(c))
+    if (iata.length >= 2 && iata[0] !== iata[1]) { [from, to] = iata; break }
+  }
+  if (!from || !to) return null
+  const depLine = lines.find((l) => /출발\s*일|departure\s*date|출국|가는\s*날|出発日/i.test(l)) ?? ''
+  const depDate = findDates(depLine, year)[0] ?? pickTripDate(text, days)
+  const range = text.match(/(?<!\d)([01]?\d|2[0-3]):([0-5]\d)\s*[~\-–—]\s*([01]?\d|2[0-3]):([0-5]\d)(\s*\(?\+1\)?)?/)
+  const one = (re: RegExp) => { const l = lines.find((x) => re.test(x)); return l ? findTime(l.replace(re, ' ')) : undefined }
+  const depTime = range ? `${range[1].padStart(2, '0')}:${range[2]}` : one(/출발\s*시간|departure\s*time|出発時刻/i)
+  const arrTime = range ? `${range[3].padStart(2, '0')}:${range[4]}` : one(/도착\s*시간|arrival\s*time|到着時刻/i)
+  if (!depDate || !depTime || !arrTime) return null
+  const nextDay = Boolean(range?.[5]) || /\+1\s*일|\(\+1\)|翌日/.test(text)
+  const flight: Flight = { id: '', flightNo: `${no[1].toUpperCase()}${no[2]}`, from, to, depDate, depTime, arrDate: nextDay ? addDays(depDate, 1) : depDate, arrTime }
+  const pnr = findCode(text)
+  if (pnr && /^[A-Z0-9]{5,8}$/.test(pnr)) flight.pnr = pnr
+  return flight
+}
+
+const CHROME = /^\s*\d{1,2}:\d{2}(?!\s*[~\-–—]\s*\d)(\s|$)|\b[\w-]+\.(com|net|org|co|kr|jp|io|travel|app)(\.[a-z]{2})?\b|ask\s*gemini|new\s*tab|all\s*tabs|^\s*[<←]\s|결제하기|다음\s*단계|^\s*[+©]\s/i
 
 /** 흔한 체인점 이름은 OCR이 조금 틀려도 바로잡는다 (T-ELEVEN → 7-Eleven) */
 const BRANDS = ['7-Eleven', 'FamilyMart', 'Lawson', 'Starbucks', 'Starbucks Reserve', 'McDonald\'s', 'Burger King', 'KFC', 'Subway', 'Don Quijote', 'Uniqlo', 'Muji', 'Tops', 'Big C', 'Lotus\'s', 'Boots', 'Watsons', 'MaxValu', 'Daiso', 'Olive Young', 'GS25', 'CU', 'emart24', 'Grab', 'Bolt', 'Uber']
@@ -177,10 +213,14 @@ export function fixBrand(name: string): string {
 export function readText(lines: OcrLine[], days: string[], tripCurrency: string): Reading {
   const text = lines.map((l) => l.text).join('\n')
   const year = Number((days[0] ?? '').slice(0, 4)) || new Date().getFullYear()
-  const flights = parseFlightText(text, year).filter(isComplete).map((f, i) => ({ ...f, id: `ocr${Date.now()}${i}` }))
-  const kind = KINDS.find((k) => k.re.test(text))
-  const amount = findTotal(lines.map((l) => l.text))
-  const name = findName(lines)
+  let flights: Flight[] = parseFlightText(text, year).filter(isComplete)
+  if (!flights.length) { const t = flightFromTable(text, days); if (t) flights = [t] }
+  flights = flights.map((f, i) => ({ ...f, id: `ocr${Date.now()}${i}` }))
+  const kind = flights.length ? { cat: 'sight' as Category, exp: 'move' as ExpenseCategory, costOnly: true } : KINDS.find((k) => k.re.test(text))
+  // 휴대폰 상태 표시줄(시계·배터리)과 브라우저 주소창·메뉴 줄은 내용이 아니다
+  const body = lines.filter((l) => !CHROME.test(l.text))
+  const amount = findTotal(body.map((l) => l.text))
+  const name = findName(body)
   // 통화 기호를 못 읽었을 때: 한글 위주면 원화, 가나가 있으면 엔화로 본다
   const hangul = (text.match(/\p{Script=Hangul}/gu) ?? []).length
   const kana = /[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(text)
@@ -189,7 +229,7 @@ export function readText(lines: OcrLine[], days: string[], tripCurrency: string)
     name: name && fixBrand(name),
     code: findCode(text),
     date: pickTripDate(text, days),
-    time: findTime(text),
+    time: findTime(lines.filter((l) => /시간|시각|time|체크\s*인|check[\s-]*in|입장|時/i.test(l.text)).map((l) => l.text).join('\n')) ?? findTime(body.map((l) => l.text).join('\n')),
     amount,
     currency: amount ? findCurrency(text, guessCur) : undefined,
     category: kind?.cat ?? 'sight',

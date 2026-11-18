@@ -56,7 +56,17 @@ export async function readTripPhoto(file: File, trip: Trip, current: string, onS
     : await recognizeLines(file, ocrPasses(here.country ?? trip.country), (p) => onStage?.(tr('글자 인식 준비 중 {0}%', Math.round(p * 100)))).catch(() => [])
   const r = readText(lines, days, trip.currency)
   const out: Draft[] = r.flights.map((f) => ({ date: f.depDate, dateFrom: 'image' as const, flight: f }))
-  if (out.length && !r.amount) return out
+  if (out.length) {
+    // 항공권: 항공편으로 넣고, 금액이 있으면 교통비로 예산에 남긴다 (일정에 장소로는 넣지 않는다)
+    const money = r.amount ? toBudget(trip, r.amount, r.currency ?? trip.currency, 0) : null
+    const f = out[0].flight!
+    if (money) {
+      // 항공편을 넣으면 여행 기간이 그 날까지 늘어나므로 출발일을 그대로 쓴다
+      const date = f.depDate
+      out.push({ date, dateFrom: 'image', expense: { id: uid(), title: tr('{0} 항공권 ({1}→{2})', f.flightNo, f.from, f.to), amount: money.amount, currency: money.currency, category: 'move', date } })
+    }
+    return out
+  }
 
   const { date, from } = pickDate(days, r.date, exif.date, current)
   const near = legOf(trip, date)

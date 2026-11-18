@@ -6,3 +6,6 @@ interface ImportMetaEnv {
   /** Google API 키 (공유받은 파일을 여는 Picker용) */
   readonly VITE_GOOGLE_API_KEY?: string
 }
+
+/** 빌드한 커밋 (앞 7자리) */
+declare const __APP_VERSION__: string

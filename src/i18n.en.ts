@@ -359,4 +359,6 @@ export const EN: Record<string, string> = {
   "사진 속 결제": "Payment from photo",
   "영수증, 예약 화면, 탑승권, 장소 사진, 예약 확인서 PDF를 이 기기 안에서 읽습니다 (사진은 밖으로 나가지 않습니다). 날짜는 사진 속 날짜, 없으면 찍은 날짜를 따르고, 금액은 예산 탭에 기록되어 동행과 똑같이 나눕니다.": "Reads receipts, booking screens, boarding passes, photos of places and booking PDFs on this device (nothing leaves it). The date comes from the contents, or when the photo was taken. Amounts go to the budget, split evenly with companions.",
   "예약번호 {0}": "Booking no. {0}",
+  "버전 {0}": "Version {0}",
+  "{0} 항공권 ({1}→{2})": "{0} flight ({1}→{2})",
 }

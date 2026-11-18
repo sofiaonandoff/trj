@@ -43,5 +43,12 @@ check('천 단위 띄어 읽힘', parseAmount('合計 ¥2 200') === 2200)
 check('체인 이름 보정', fixBrand('T-ELEVEN') === '7-Eleven')
 check('CJK 띄어 읽힘 붙이기', despaceCJK('명 동 교 자 본점') === '명동교자 본점' && despaceCJK('一 蘭 渋谷 店') === '一蘭渋谷店' && despaceCJK('2026 年 12 月 3 日') === '2026年12月3日', [despaceCJK('명 동 교 자 본점'), despaceCJK('一 蘭 渋谷 店'), despaceCJK('2026 年 12 月 3 日')])
 check('평범한 한국어 띄어쓰기는 그대로', despaceCJK('총 결제금액 482,300') === '총 결제금액 482,300')
+// 실제 사용자 캡처(항공사 예약 확인 단계)를 OCR한 줄 그대로
+const trinity = readText(['3:20                                     all 수 114', 'ㅡ                 m.trinityairways.com       M       …', '<    선택 내역 확인 및 규정 동의    X', '04. 예약 확인                                                      —', '구간 1', 'SYD 시드니 ㆍ ICN 서울/인천', '출발일                                      2026-12-14(월)', '편명                                                     TW502', '기종                                                 A330-300', '출/도착 시간                                              12:15~21:15', '비행 시간                                              11h 00m', '운항 구분                                                   직항', '실제 운항사                                        트리니티항공', '운임 종류                                             비즈니스 운임', '전체 탑승객 편도 총액                   KRW 3,743,900 V', '총액                                              KRW3,743,900', '결제하기', '+      ©', 'Ask Gemini                 New Tab                   All Tabs'].map((text, i) => ({ text, top: i * 40, height: 30 })), ['2026-12-10', '2026-12-14'], 'AUD')
+const tf = trinity.flights[0]
+check('표 형식 항공권: 편명·구간·날짜·시각', tf?.flightNo === 'TW502' && tf.from === 'SYD' && tf.to === 'ICN' && tf.depDate === '2026-12-14' && tf.depTime === '12:15' && tf.arrTime === '21:15' && tf.arrDate === '2026-12-14', tf)
+check('표 형식 항공권: 총액은 원화 교통비', trinity.amount === 3743900 && trinity.currency === 'KRW' && trinity.expenseCategory === 'move', trinity)
+check('상태 표시줄 시계(3:20)는 시각이 아니다', trinity.time === '12:15', trinity.time)
+check('주소창·단계 머리말은 이름이 아니다', !/trinityairways|예약 확인/.test(trinity.name ?? ''), trinity.name)
 console.log(fail ? `${fail}개 실패` : '모두 통과')
 process.exit(fail ? 1 : 0)

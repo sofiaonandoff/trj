@@ -1,6 +1,10 @@
 import { defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
+import { execSync } from 'node:child_process'
+
+/** 화면 아래에 보여 줄 빌드 버전: Cloudflare가 주는 커밋, 없으면 로컬 git */
+const version = (process.env.CF_PAGES_COMMIT_SHA ?? (() => { try { return execSync('git rev-parse HEAD').toString() } catch { return 'dev' } })()).trim().slice(0, 7)
 import { handlePlan, type PlanEnv } from './server/plan'
 
 /**
@@ -34,6 +38,7 @@ function localApi(env: PlanEnv): Plugin {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '') as PlanEnv
   return {
+    define: { __APP_VERSION__: JSON.stringify(version) },
     plugins: [
       react(),
       localApi(env),
