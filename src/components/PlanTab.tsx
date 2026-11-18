@@ -2,7 +2,7 @@ import { tr } from '../i18n'
 import { Reorder, useDragControls } from 'framer-motion'
 import { Camera, Check, Clock, GripVertical, MapPin, Plane, Plus, Route, Sparkles, Trash2 } from 'lucide-react'
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
-import { AIRPORTS, airlineOf, airport } from '../data/airports'
+import { CORE_AIRPORTS, airlineOf, airport } from '../data/airports'
 import { CATEGORY, destination } from '../data/destinations'
 import { aiMessage, aiSuggest } from '../lib/ai'
 import { legOf } from '../lib/legs'
@@ -438,7 +438,7 @@ function FlightSheet({ trip, flight, onClose }: { trip: Trip; flight?: Flight | 
           <label className="field"><span>{tr('도착 공항')}{leg.to && airport(leg.to) ? ` · ${airport(leg.to)!.city}` : ''}</span>
             <input list="trj-airports" maxLength={3} value={leg.to ?? ''} onChange={(e) => set({ to: e.target.value.toUpperCase() })} placeholder="NRT" /></label>
         </div>
-        <datalist id="trj-airports">{AIRPORTS.map((a) => <option key={a.code} value={a.code}>{a.city} {a.name}</option>)}</datalist>
+        <datalist id="trj-airports">{CORE_AIRPORTS.map((a) => <option key={a.code} value={a.code}>{a.city} {a.name}</option>)}</datalist>
         <div className="row">
           <label className="field"><span>{tr('출발일')}</span><input type="date" value={leg.depDate ?? ''} onChange={(e) => set({ depDate: e.target.value, arrDate: !leg.arrDate || leg.arrDate < e.target.value ? e.target.value : leg.arrDate })} /></label>
           <label className="field"><span>{tr('출발 시각')}</span><input type="time" value={leg.depTime ?? ''} onChange={(e) => set({ depTime: e.target.value })} /></label>

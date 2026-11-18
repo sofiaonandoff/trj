@@ -1,4 +1,4 @@
-import { airport, AIRPORTS, type Airport } from '../data/airports'
+import { airport, CORE_AIRPORTS, type Airport } from '../data/airports'
 import { destination } from '../data/destinations'
 import type { Leg, Trip } from '../types'
 import { addDays, dateRange, km } from './util'
@@ -50,7 +50,7 @@ export function fitLegs(t: Trip, prevStart: string) {
 export function nearestAirport(p: { lat: number; lng: number; destId?: string }): Airport | undefined {
   const own = destination(p.destId)?.airport
   if (own) return airport(own)
-  const best = AIRPORTS.reduce((a, b) => (km(p, a) < km(p, b) ? a : b))
+  const best = CORE_AIRPORTS.reduce((a, b) => (km(p, a) < km(p, b) ? a : b))
   return km(p, best) <= 120 ? best : undefined
 }
 

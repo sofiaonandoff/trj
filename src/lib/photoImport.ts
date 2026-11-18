@@ -1,5 +1,6 @@
 import { tr } from '../i18n'
 import type { Expense, Flight, Place, Trip } from '../types'
+import { loadWorldAirports } from '../data/airports'
 import { reverseGeocode, searchPlaces } from './geocode'
 import { legOf } from './legs'
 import { ocrPasses, recognizeLines } from './ocr'
@@ -54,6 +55,7 @@ export async function readTripPhoto(file: File, trip: Trip, current: string, onS
   const lines = pdf
     ? await import('./pdfText').then((m) => m.pdfLines(file)).catch(() => [])
     : await recognizeLines(file, ocrPasses(here.country ?? trip.country), (p) => onStage?.(tr('글자 인식 준비 중 {0}%', Math.round(p * 100)))).catch(() => [])
+  await loadWorldAirports()
   const r = readText(lines, days, trip.currency)
   const out: Draft[] = r.flights.map((f) => ({ date: f.depDate, dateFrom: 'image' as const, flight: f }))
   if (out.length) {

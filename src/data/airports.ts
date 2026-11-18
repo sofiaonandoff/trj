@@ -52,8 +52,27 @@ const raw: [string, string, string, number, number, string][] = [
   ['YVR', '밴쿠버', '밴쿠버국제공항', 49.1967, -123.1815, 'America/Vancouver'],
 ]
 
-export const AIRPORTS: Airport[] = raw.map(([code, city, name, lat, lng, tz]) => ({ code, city: tr(city), name: tr(name), lat, lng, tz }))
-export const airport = (code: string) => AIRPORTS.find((a) => a.code === code)
+/** 자주 가는 공항 (한국어 이름이 있다). 공항 고르기 목록과 도시의 가까운 공항 찾기에 쓴다 */
+export const CORE_AIRPORTS: Airport[] = raw.map(([code, city, name, lat, lng, tz]) => ({ code, city: tr(city), name: tr(name), lat, lng, tz }))
+/** 아는 모든 공항. 앱이 시작하면 세계 공항(정기편 있는 약 3,200곳)이 더해진다 */
+export const AIRPORTS: Airport[] = [...CORE_AIRPORTS]
+const byCode = new Map(AIRPORTS.map((a) => [a.code, a]))
+export const airport = (code: string) => byCode.get(code)
+
+let world: Promise<void> | null = null
+/** 세계 공항 목록을 불러와 AIRPORTS에 더한다 (한 번만). 항공편 해석 전에 기다린다 */
+export function loadWorldAirports(): Promise<void> {
+  world ??= import('./airportsWorld').then(({ default: data }) => {
+    for (const line of data.split('\n')) {
+      const [code, city, name, lat, lng, tz] = line.split('|')
+      if (!code || byCode.has(code)) continue
+      const a = { code, city, name, lat: Number(lat), lng: Number(lng), tz }
+      AIRPORTS.push(a)
+      byCode.set(code, a)
+    }
+  }).catch(() => { world = null })
+  return world
+}
 
 const AIRLINES_KO: Record<string, string> = {
   KE: '대한항공', OZ: '아시아나항공', '7C': '제주항공', LJ: '진에어', TW: '티웨이항공', BX: '에어부산',

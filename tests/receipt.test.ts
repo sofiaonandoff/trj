@@ -1,6 +1,9 @@
 import { despaceCJK } from '../src/lib/ocr'
 import { findCode, findDates, findName, findTime, findTotal, fixBrand, parseAmount, pickTripDate, readText } from '../src/lib/receipt'
 
+import { loadWorldAirports } from '../src/data/airports'
+await loadWorldAirports()
+
 let fail = 0
 const check = (label: string, ok: boolean, got?: unknown) => { if (!ok) fail++; console.log(ok ? 'PASS' : 'FAIL', label, ok ? '' : JSON.stringify(got)) }
 const days = ['2026-12-02', '2026-12-03', '2026-12-04', '2026-12-05']
@@ -50,5 +53,9 @@ check('표 형식 항공권: 편명·구간·날짜·시각', tf?.flightNo === '
 check('표 형식 항공권: 총액은 원화 교통비', trinity.amount === 3743900 && trinity.currency === 'KRW' && trinity.expenseCategory === 'move', trinity)
 check('상태 표시줄 시계(3:20)는 시각이 아니다', trinity.time === '12:15', trinity.time)
 check('주소창·단계 머리말은 이름이 아니다', !/trinityairways|예약 확인/.test(trinity.name ?? ''), trinity.name)
+// 실제 사용자 캡처(항공사 앱 예약 조회: 시각과 공항이 줄마다 나뉜 모양, 편명에 항목 없음)
+const ke = readText(['10:38 \\                         all > [25 ]', '<                   예약 조회                  X', '2026년 12월 02일 (수)', '© 18:25                            ICN', ': _서울/인천ㆍ터미널 2', 'ㅇ                  11시간 30분', 'e 09:55 +1일                      AKL', '오클랜드ㆍ터미널 I (International)', '@ KE411 B787-10', '일반석(@)   D Zz', '일반석 스탠다드', '좌석 및 서비스 신청', 'OH HYESOO                                  PA', '45B           초과 수하물             기타 서비스'].map((text, i) => ({ text, top: i * 40, height: 30 })), ['2026-12-02', '2026-12-03'], 'NZD')
+const kf = ke.flights[0]
+check('시간표 항공권: KE411 인천→오클랜드, +1일 도착, 좌석', kf?.flightNo === 'KE411' && kf.from === 'ICN' && kf.to === 'AKL' && kf.depDate === '2026-12-02' && kf.depTime === '18:25' && kf.arrDate === '2026-12-03' && kf.arrTime === '09:55' && kf.seat === '45B', kf)
 console.log(fail ? `${fail}개 실패` : '모두 통과')
 process.exit(fail ? 1 : 0)

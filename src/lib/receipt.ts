@@ -1,5 +1,5 @@
 import type { Category, ExpenseCategory, Flight } from '../types'
-import { AIRPORTS } from '../data/airports'
+import { AIRLINES, AIRPORTS } from '../data/airports'
 import { isComplete, parseFlightText } from './flight'
 import { addDays } from './util'
 
@@ -158,38 +158,67 @@ export function findName(lines: OcrLine[]): string | undefined {
 }
 
 /**
- * 항목: 값 줄로 된 항공권 화면 (예약 확인 단계, 항공사 앱):
- *   SYD 시드니 ✈ ICN 서울/인천 / 출발일 2026-12-14(월) / 편명 TW502 / 출/도착 시간 12:15~21:15
- * parseFlightText는 편명 뒤의 글자만 보므로, 편명 앞에 나오는 구간·날짜를 화면 전체에서 채운다.
+ * 줄이 나뉜 항공권 화면에서 항공편을 만든다. 두 가지 모양을 받는다.
+ * 1) 항목: 값 표 (예약 확인 단계):  SYD 시드니 ✈ ICN 서울/인천 / 출발일 2026-12-14(월) / 편명 TW502 / 출/도착 시간 12:15~21:15
+ * 2) 시간표 (항공사 앱 예약 조회): 2026년 12월 02일 / 18:25 ICN / 09:55 +1일 AKL / KE411 B787-10 / 좌석 45B
+ * parseFlightText는 편명 뒤의 글자만 보므로, 편명 앞에 나오는 구간·날짜·시각을 화면 전체에서 채운다.
  */
 export function flightFromTable(text: string, days: string[]): Flight | null {
   const year = Number((days[0] ?? '').slice(0, 4)) || new Date().getFullYear()
-  const no = text.match(/(?:편명|항공편|flight\s*(?:no\.?|number)?|便名)\s*[:：]?\s*([A-Z0-9]{2})\s?(\d{1,4})\b/i)
-  if (!no) return null
-  const codes = new Set(AIRPORTS.map((a) => a.code))
   const lines = text.split('\n')
-  // 출발·도착 공항: 아는 공항 코드 두 개가 나오는 첫 줄
-  let from: string | undefined, to: string | undefined
-  for (const l of lines) {
-    const iata = [...l.matchAll(/\b([A-Z]{3})\b/g)].map((m) => m[1]).filter((c) => codes.has(c))
-    if (iata.length >= 2 && iata[0] !== iata[1]) { [from, to] = iata; break }
+  const codes = new Set(AIRPORTS.map((a) => a.code))
+  const NOT_AIRPORT = new Set(['KRW', 'USD', 'JPY', 'EUR', 'THB', 'PNR', 'VAT', 'ETA', 'ETD', 'GMT', 'UTC', 'PAY', 'AND', 'THE'])
+  const isAirport = (c: string) => codes.has(c) && !NOT_AIRPORT.has(c)
+
+  // 편명: "편명 TW502"처럼 항목이 있으면 그것, 없으면 아는 항공사 코드로 시작하는 낱말 (B787-10 같은 기종은 뺀다)
+  let flightNo: string | undefined
+  const labeled = text.match(/(?:편명|항공편|flight\s*(?:no\.?|number)?|便名)\s*[:：]?\s*([A-Z0-9]{2})\s?(\d{1,4})\b/i)
+  if (labeled) flightNo = `${labeled[1].toUpperCase()}${labeled[2]}`
+  else {
+    for (const m of text.matchAll(/(?<![A-Z0-9-])([A-Z]{2}|[A-Z]\d|\d[A-Z])\s?(\d{2,4})(?![\d-])/g)) {
+      if (AIRLINES[m[1]] && !/^[AB]\d{3}/.test(m[0])) { flightNo = `${m[1]}${m[2]}`; break }
+    }
   }
+  if (!flightNo) return null
+
+  // 구간: 아는 공항 코드 둘이 한 줄에 있으면 그 줄, 아니면 나온 순서대로 앞의 둘
+  let from: string | undefined, to: string | undefined
+  const allCodes: string[] = []
+  for (const l of lines) {
+    const iata = [...l.matchAll(/\b([A-Z]{3})\b/g)].map((m) => m[1]).filter(isAirport)
+    if (!from && iata.length >= 2 && iata[0] !== iata[1]) [from, to] = iata
+    for (const c of iata) if (!allCodes.includes(c)) allCodes.push(c)
+  }
+  if (!from && allCodes.length >= 2) [from, to] = allCodes
   if (!from || !to) return null
+
+  // 출발일: 출발일 항목이 있으면 그 줄, 없으면 화면의 첫 날짜
   const depLine = lines.find((l) => /출발\s*일|departure\s*date|출국|가는\s*날|出発日/i.test(l)) ?? ''
-  const depDate = findDates(depLine, year)[0] ?? pickTripDate(text, days)
+  const depDate = findDates(depLine, year)[0] ?? findDates(text, year)[0] ?? pickTripDate(text, days)
+
+  // 시각: "12:15~21:15", 출발/도착 시간 항목, 또는 공항 코드와 같은 줄의 시각
+  const hhmm = (l: string) => { const m = l.match(/(?<![\d:])([01]?\d|2[0-3])\s*:\s*([0-5]\d)(?![\d:])/); return m ? `${m[1].padStart(2, '0')}:${m[2]}` : undefined }
   const range = text.match(/(?<!\d)([01]?\d|2[0-3]):([0-5]\d)\s*[~\-–—]\s*([01]?\d|2[0-3]):([0-5]\d)(\s*\(?\+1\)?)?/)
-  const one = (re: RegExp) => { const l = lines.find((x) => re.test(x)); return l ? findTime(l.replace(re, ' ')) : undefined }
-  const depTime = range ? `${range[1].padStart(2, '0')}:${range[2]}` : one(/출발\s*시간|departure\s*time|出発時刻/i)
-  const arrTime = range ? `${range[3].padStart(2, '0')}:${range[4]}` : one(/도착\s*시간|arrival\s*time|到着時刻/i)
+  const labeledTime = (re: RegExp) => { const l = lines.find((x) => re.test(x)); return l ? hhmm(l.replace(re, ' ')) : undefined }
+  const besideCode = (code: string) => { const l = lines.find((x) => new RegExp(`\\b${code}\\b`).test(x) && hhmm(x)); return l ? hhmm(l) : undefined }
+  const times = lines.map(hhmm).filter((t): t is string => Boolean(t))
+  const depTime = range ? `${range[1].padStart(2, '0')}:${range[2]}` : labeledTime(/출발\s*시간|departure\s*time|出発時刻/i) ?? besideCode(from) ?? times[0]
+  const arrTime = range ? `${range[3].padStart(2, '0')}:${range[4]}` : labeledTime(/도착\s*시간|arrival\s*time|到着時刻/i) ?? besideCode(to) ?? times.find((t) => t !== depTime)
   if (!depDate || !depTime || !arrTime) return null
-  const nextDay = Boolean(range?.[5]) || /\+1\s*일|\(\+1\)|翌日/.test(text)
-  const flight: Flight = { id: '', flightNo: `${no[1].toUpperCase()}${no[2]}`, from, to, depDate, depTime, arrDate: nextDay ? addDays(depDate, 1) : depDate, arrTime }
+
+  // 도착일: +1일 표시가 있거나, 도착 시각이 출발보다 이르면 다음 날
+  const plus = text.match(/\+\s*([12])\s*(일|day|日)|\(\+([12])\)|翌日|next\s*day/i)
+  const add = plus ? Number(plus[1] ?? plus[3] ?? 1) : arrTime < depTime ? 1 : 0
+  const flight: Flight = { id: '', flightNo, from, to, depDate, depTime, arrDate: add ? addDays(depDate, add) : depDate, arrTime }
   const pnr = findCode(text)
   if (pnr && /^[A-Z0-9]{5,8}$/.test(pnr)) flight.pnr = pnr
+  // 좌석: "좌석 45B" 또는 좌석 안내가 있는 화면의 "45B"
+  const seat = text.match(/(?:좌석|seat)\s*[:：]?\s*(\d{1,2}[A-K])\b/i)?.[1] ?? (/좌석|seat/i.test(text) ? text.match(/(?<![\w-])(\d{1,2}[A-K])(?![\w-])/)?.[1] : undefined)
+  if (seat) flight.seat = seat
   return flight
 }
 
-const CHROME = /^\s*\d{1,2}:\d{2}(?!\s*[~\-–—]\s*\d)(\s|$)|\b[\w-]+\.(com|net|org|co|kr|jp|io|travel|app)(\.[a-z]{2})?\b|ask\s*gemini|new\s*tab|all\s*tabs|^\s*[<←]\s|결제하기|다음\s*단계|^\s*[+©]\s/i
+const CHROME = /^\s*\d{1,2}:\d{2}(?!\s*[~\-–—]\s*\d)(\s|$)|\b[\w-]+\.(com|net|org|co|kr|jp|io|travel|app)(\.[a-z]{2})?\b|ask\s*gemini|new\s*tab|all\s*tabs|^\s*[<←]\s|결제하기|다음\s*단계|^[\s+©@]*$/i
 
 /** 흔한 체인점 이름은 OCR이 조금 틀려도 바로잡는다 (T-ELEVEN → 7-Eleven) */
 const BRANDS = ['7-Eleven', 'FamilyMart', 'Lawson', 'Starbucks', 'Starbucks Reserve', 'McDonald\'s', 'Burger King', 'KFC', 'Subway', 'Don Quijote', 'Uniqlo', 'Muji', 'Tops', 'Big C', 'Lotus\'s', 'Boots', 'Watsons', 'MaxValu', 'Daiso', 'Olive Young', 'GS25', 'CU', 'emart24', 'Grab', 'Bolt', 'Uber']
@@ -214,7 +243,7 @@ export function readText(lines: OcrLine[], days: string[], tripCurrency: string)
   const text = lines.map((l) => l.text).join('\n')
   const year = Number((days[0] ?? '').slice(0, 4)) || new Date().getFullYear()
   let flights: Flight[] = parseFlightText(text, year).filter(isComplete)
-  if (!flights.length) { const t = flightFromTable(text, days); if (t) flights = [t] }
+  if (!flights.length) { const t = flightFromTable(lines.filter((l) => !CHROME.test(l.text)).map((l) => l.text).join('\n'), days); if (t) flights = [t] }
   flights = flights.map((f, i) => ({ ...f, id: `ocr${Date.now()}${i}` }))
   const kind = flights.length ? { cat: 'sight' as Category, exp: 'move' as ExpenseCategory, costOnly: true } : KINDS.find((k) => k.re.test(text))
   // 휴대폰 상태 표시줄(시계·배터리)과 브라우저 주소창·메뉴 줄은 내용이 아니다

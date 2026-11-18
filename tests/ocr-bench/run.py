@@ -33,7 +33,7 @@ async def main(tag):
         for t in truth:
             langs=[['eng','kor'],['eng',t.get('langs','tha')]]
             out=await pg.evaluate('''async ([f,langs])=>{
-              const ocr=await import('/src/lib/ocr.ts'); const rc=await import('/src/lib/receipt.ts')
+              const ocr=await import('/src/lib/ocr.ts'); const rc=await import('/src/lib/receipt.ts'); await (await import('/src/data/airports.ts')).loadWorldAirports()
               const blob=await (await fetch('http://bench.local/'+f)).blob()
               const t0=performance.now()
               const lines=await ocr.recognizeLines(blob,langs)
