@@ -1,18 +1,19 @@
 import { tr } from '../i18n'
 import { Reorder, useDragControls } from 'framer-motion'
-import { Check, Clock, GripVertical, MapPin, Plane, Plus, Route, Sparkles, Trash2 } from 'lucide-react'
+import { Camera, Check, Clock, GripVertical, MapPin, Plane, Plus, Route, Sparkles, Trash2 } from 'lucide-react'
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { AIRPORTS, airlineOf, airport } from '../data/airports'
 import { CATEGORY, destination } from '../data/destinations'
 import { aiMessage, aiSuggest } from '../lib/ai'
 import { legOf } from '../lib/legs'
 import { flightMinutes, isComplete, parseFlightText } from '../lib/flight'
-import { searchPlaces, type GeoResult } from '../lib/geocode'
+import { localizeResults, searchPlaces, type GeoResult } from '../lib/geocode'
 import { poiToPlace, retime, shortest, suggestions } from '../lib/planner'
 import { arc, distLabel, fmtDur, fromMin, haptic, km, md, toMin, travelLabel, travelMin, uid, weekday, wonShort } from '../lib/util'
 import { putFlight, useStore } from '../store'
 import type { Category, Flight, Place, Trip } from '../types'
 import type { MapPoint } from './MapView'
+import PhotoImport from './PhotoImport'
 import { Sheet, toast } from './ui'
 
 const MapView = lazy(() => import('./MapView'))
@@ -28,6 +29,7 @@ export default function PlanTab({ trip }: { trip: Trip }) {
   const leg = legOf(trip, day0date(trip, idx))
   const [editId, setEditId] = useState<string>()
   const [flight, setFlight] = useState<Flight | 'new'>()
+  const [photos, setPhotos] = useState<File[] | null>(null)
   const di = Math.min(idx, trip.days.length - 1)
   const day = trip.days[di]
 
@@ -103,7 +105,11 @@ export default function PlanTab({ trip }: { trip: Trip }) {
 
       <div className="add-row">
         <button className="btn btn-primary" onClick={() => setAdding('search')}><Plus size={18} />{tr('장소 추가')}</button>
-        <button className="btn btn-ghost" onClick={() => setFlight('new')}><Plane size={18} />{tr('항공편 추가')}</button>
+        <label className="btn btn-ghost">
+          <Camera size={18} />{tr('사진으로 추가')}
+          <input type="file" accept="image/*" multiple hidden onChange={(e) => { const f = [...(e.target.files ?? [])]; e.target.value = ''; if (f.length) setPhotos(f) }} />
+        </label>
+        <button className="btn btn-ghost" onClick={() => setFlight('new')} aria-label={tr('항공편 추가')}><Plane size={18} /><span className="wide-only">{tr('항공편')}</span></button>
       </div>
       {day.items.length > 1 && (
         <div className="tools">
@@ -115,6 +121,8 @@ export default function PlanTab({ trip }: { trip: Trip }) {
       <AddPlaceSheet open={adding !== false} initial={adding || 'search'} onClose={() => setAdding(false)} trip={trip} di={di} />
       <EditPlaceSheet trip={trip} di={di} id={editId} onClose={() => setEditId(undefined)} />
       <FlightSheet trip={trip} flight={flight} onClose={() => setFlight(undefined)} />
+      <PhotoImport trip={trip} files={photos} current={day.date} onClose={() => setPhotos(null)}
+        onGo={(date) => { const i = trip.days.findIndex((d) => d.date === date); if (i >= 0) setIdx(i) }} />
     </>
   )
 }
@@ -211,7 +219,11 @@ function AddPlaceSheet({ open, initial, onClose, trip, di }: { open: boolean; in
     if (q.trim().length < 2) { setResults(undefined); return }
     const ac = new AbortController()
     const id = setTimeout(() => {
-      searchPlaces(q, leg, ac.signal).then((r) => { setResults(r); setError('') })
+      searchPlaces(q, leg, ac.signal).then((r) => {
+        setResults(r); setError('')
+        // 지도에 한국어(영어) 이름이 없는 곳은 화면 언어 이름을 받아 바꿔 보여 준다
+        localizeResults(r, leg.city).then((l) => { if (!ac.signal.aborted && l !== r) setResults(l) })
+      })
         .catch((e) => { if (e.name !== 'AbortError') setError(tr('검색하지 못했습니다. 연결을 확인한 뒤 다시 입력하세요')) })
     }, 500)
     return () => { clearTimeout(id); ac.abort() }

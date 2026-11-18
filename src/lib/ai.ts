@@ -27,7 +27,7 @@ export function aiMessage(e: unknown): string {
 async function call<T>(body: { mode: string; [k: string]: unknown }): Promise<T> {
   const ac = new AbortController()
   // 서버가 정한 시간 예산보다 조금 길게 기다린다
-  const timer = setTimeout(() => ac.abort(), body.mode === 'more' ? 40_000 : 95_000)
+  const timer = setTimeout(() => ac.abort(), body.mode === 'names' ? 18_000 : body.mode === 'trip' ? 95_000 : 40_000)
   try {
     const res = await fetch('/api/plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, lang }), signal: ac.signal })
     // 서버 함수가 없는 곳(정적 호스팅)에서는 JSON이 아닌 답이 온다
@@ -102,4 +102,24 @@ export async function aiSuggest(trip: Trip, dayIndex: number): Promise<Place[]> 
   if (!out.length) throw new AiError('bad_output')
   // 이 화면에서는 시각을 쓰지 않는다: 넣을 때 앞 장소에 이어서 정한다
   return out.map((p) => ({ ...p, time: undefined }))
+}
+
+/** 장소 이름을 화면 언어로 읽을 수 있게 바꿔 받는다. 같은 이름은 다시 묻지 않는다 */
+const nameCache = new Map<string, string>()
+export async function aiLocalizeNames(names: string[], city?: string): Promise<string[]> {
+  const key = (n: string) => `${lang}:${n}`
+  const ask = [...new Set(names.filter((n) => !nameCache.has(key(n))))].slice(0, 12)
+  if (ask.length) {
+    const data = await call<{ names?: unknown[] }>({ mode: 'names', names: ask, city })
+    const got = Array.isArray(data.names) ? data.names : []
+    if (got.length === ask.length) ask.forEach((n, i) => { const v = typeof got[i] === 'string' ? (got[i] as string).trim().slice(0, 80) : ''; if (v) nameCache.set(key(n), v) })
+  }
+  return names.map((n) => nameCache.get(key(n)) ?? n)
+}
+
+/** 사진 한 장에서 모델이 읽어 낸 항목 (값 확인은 photoImport.ts가 한다) */
+export type PhotoRaw = Record<string, unknown>
+export async function aiReadPhoto(data: string, ctx: { city: string; country?: string; start: string; end: string; taken?: string }): Promise<PhotoRaw[]> {
+  const res = await call<{ items?: PhotoRaw[] }>({ mode: 'photo', image: { data, mime: 'image/jpeg' }, ...ctx })
+  return Array.isArray(res.items) ? res.items.slice(0, 6) : []
 }

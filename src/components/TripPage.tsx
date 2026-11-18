@@ -1,15 +1,14 @@
 import { tr } from '../i18n'
 import { motion } from 'framer-motion'
-import { ArrowLeft, BookOpen, Copy, Download, ImageDown, Link2, ListChecks, Route, Share2, Trash2, Wallet } from 'lucide-react'
+import { ArrowLeft, BookOpen, Download, Link2, ListChecks, Route, Share2, Trash2, Wallet } from 'lucide-react'
 import { useState } from 'react'
-import { shareLink, toMarkdown, toYouTube } from '../lib/share'
+import { shareLink } from '../lib/share'
 import { diffDays, download, fmtRange, haptic, today } from '../lib/util'
 import { fitLegs } from '../lib/legs'
 import { syncDays, useStore } from '../store'
 import type { Trip } from '../types'
 import BudgetTab from './BudgetTab'
 import { CoEdit, DriveChip } from './DriveUI'
-import ExportSheet from './ExportSheet'
 import JournalTab from './JournalTab'
 import PlanTab from './PlanTab'
 import PrepTab from './PrepTab'
@@ -28,7 +27,6 @@ export default function TripPage({ id }: { id: string }) {
   const mutate = useStore((s) => s.mutate)
   const [tab, setTab] = useState<TabId>('plan')
   const [sharing, setSharing] = useState(false)
-  const [exporting, setExporting] = useState(false)
 
   if (!trip) {
     return (
@@ -74,13 +72,12 @@ export default function TripPage({ id }: { id: string }) {
         ))}
       </nav>
 
-      <ShareSheet trip={trip} open={sharing} onClose={() => setSharing(false)} onExport={() => { setSharing(false); setExporting(true) }} />
-      <ExportSheet trip={trip} open={exporting} onClose={() => setExporting(false)} />
+      <ShareSheet trip={trip} open={sharing} onClose={() => setSharing(false)} onJournal={() => { setTab('journal'); scrollTo(0, 0) }} />
     </div>
   )
 }
 
-function ShareSheet({ trip, open, onClose, onExport }: { trip: Trip; open: boolean; onClose: () => void; onExport: () => void }) {
+function ShareSheet({ trip, open, onClose, onJournal }: { trip: Trip; open: boolean; onClose: () => void; onJournal: () => void }) {
   const mutate = useStore((s) => s.mutate)
   const remove = useStore((s) => s.remove)
   const [confirm, setConfirm] = useState(false)
@@ -102,10 +99,8 @@ function ShareSheet({ trip, open, onClose, onExport }: { trip: Trip; open: boole
       <div className="stack">
         <CoEdit trip={trip} />
         <div className="list">
-          <button onClick={onExport}><ImageDown size={20} /><span className="grow"><b>{tr('이미지로 내보내기')}</b><small>{tr('템플릿 3가지, 스토리·피드·영상용 비율')}</small></span></button>
           <button onClick={send}><Link2 size={20} /><span className="grow"><b>{tr('복사본 링크 보내기')}</b><small>{tr('받은 사람은 따로 고치는 사본을 갖습니다 (로그인 없음)')}</small></span></button>
-          <button onClick={() => copy(toMarkdown(trip), tr('블로그용 글을 복사했습니다'))}><Copy size={20} /><span className="grow"><b>{tr('블로그용 글 복사')}</b><small>{tr('날짜별 코스와 기록을 마크다운으로')}</small></span></button>
-          <button onClick={() => copy(toYouTube(trip), tr('영상 설명란용 글을 복사했습니다'))}><Copy size={20} /><span className="grow"><b>{tr('유튜브 설명란용 복사')}</b><small>{tr('DAY별 코스 요약과 해시태그')}</small></span></button>
+          <button onClick={() => { onClose(); onJournal() }}><BookOpen size={20} /><span className="grow"><b>{tr('이미지·블로그·유튜브용 내보내기')}</b><small>{tr('기록 탭에서 할 수 있습니다')}</small></span></button>
           <button onClick={() => { download(`${trip.title}.trj.json`, JSON.stringify(trip, null, 2), 'application/json'); toast(tr('파일로 저장했습니다')) }}><Download size={20} /><span className="grow"><b>{tr('파일로 저장')}</b><small>{tr('내 드라이브에 보관하고, 홈에서 다시 불러올 수 있습니다')}</small></span></button>
         </div>
         <div className="row">

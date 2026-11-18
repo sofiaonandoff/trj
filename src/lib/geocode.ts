@@ -83,3 +83,38 @@ export async function searchPlaces(q: string, near?: { lat: number; lng: number 
   const known = searchAirports(q)
   return [...known, ...found.filter((f) => !known.some((k) => Math.abs(k.lat - f.lat) < 0.03 && Math.abs(k.lng - f.lng) < 0.03))]
 }
+
+/** 사진의 GPS 위치에 있는 가게·명소 이름을 찾는다 (AI가 사진을 못 읽을 때 쓴다) */
+export async function reverseGeocode(lat: number, lng: number): Promise<GeoResult | null> {
+  const u = new URL('https://nominatim.openstreetmap.org/reverse')
+  u.search = new URLSearchParams({ format: 'jsonv2', lat: String(lat), lon: String(lng), zoom: '18', 'accept-language': `${lang},en`, namedetails: '1', addressdetails: '1' }).toString()
+  const res = await fetch(u)
+  if (!res.ok) return null
+  const r = (await res.json()) as Row & { error?: string }
+  if (r.error) return null
+  const nd = r.namedetails ?? {}
+  const parts = r.display_name.split(', ')
+  const name = nd[`name:${lang}`] ?? nd['name:en'] ?? nd.int_name ?? r.name ?? parts[0]
+  return { name, detail: parts.slice(1, 4).join(', '), lat, lng, country: r.address?.country ?? '', category: guess(r.category ?? '', r.type ?? '') }
+}
+
+/** 화면 언어로 읽을 수 없는 이름인가 (한국어 화면에 한글이 없거나, 영어 화면에 라틴 문자가 아닌 글자가 있으면) */
+export const needsLocalName = (name: string) => (lang === 'ko' ? !/[가-힣]/.test(name) : /[^\p{Script=Latin}\p{N}\p{P}\p{S}\s]/u.test(name))
+
+/**
+ * 검색 결과 이름을 화면 언어로 바꾼다. 지도에 한국어(영어) 이름이 없는 곳은 trj assistant에게 표기를 받아 쓰고,
+ * 원래 이름은 local에 남긴다. AI를 쓸 수 없으면 그대로 돌려준다.
+ */
+export async function localizeResults(rows: GeoResult[], city?: string): Promise<GeoResult[]> {
+  const idx = rows.map((r, i) => (!r.airport && needsLocalName(r.name) ? i : -1)).filter((i) => i >= 0)
+  if (!idx.length) return rows
+  const { aiLocalizeNames } = await import('./ai')
+  const names = await aiLocalizeNames(idx.map((i) => rows[i].name), city).catch(() => null)
+  if (!names) return rows
+  const out = rows.slice()
+  idx.forEach((i, k) => {
+    const n = names[k]
+    if (n && n !== rows[i].name && !needsLocalName(n)) out[i] = { ...rows[i], name: n, local: rows[i].local ?? rows[i].name }
+  })
+  return out
+}

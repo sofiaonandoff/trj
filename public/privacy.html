@@ -53,6 +53,7 @@
     <h2>3. 외부 서비스로 보내는 정보</h2>
     <ul>
       <li><b>AI 일정 추천 (Google Gemini)</b>: 추천을 요청하면 목적지, 여행 날짜, 여행 속도, 고른 관심사, 이미 일정에 있는 장소 이름을 앱의 서버 함수를 거쳐 Google Gemini API로 보냅니다. 이름·이메일 같은 개인 정보는 보내지 않으며, 서버 함수는 요청 내용을 저장하지 않습니다.</li>
+      <li><b>사진으로 추가 (Google Gemini)</b>: '사진으로 추가'에서 고른 사진은 긴 변 1280px로 줄여 같은 서버 함수를 거쳐 Gemini API로 보내 가게 이름, 날짜, 금액을 읽습니다. 사진 속 위치 정보(GPS)는 보내지 않고 기기 안에서만 씁니다. 장소 이름을 한국어·영어로 바꿀 때는 검색 결과의 장소 이름만 보냅니다.</li>
       <li><b>지도 (OpenFreeMap)</b>: 지도를 그리기 위해 보고 있는 지역의 지도 조각을 받아 옵니다.</li>
       <li><b>장소 검색 (OpenStreetMap Nominatim)</b>: 검색창에 입력한 장소 이름을 보냅니다.</li>
       <li><b>호스팅 (Cloudflare)</b>: 앱 파일을 전달하는 과정에서 Cloudflare가 접속 기록(IP 주소 등)을 처리할 수 있습니다.</li>
@@ -94,6 +95,7 @@
     <h2>3. Information sent to other services</h2>
     <ul>
       <li><b>AI suggestions (Google Gemini)</b>: when you ask for suggestions, the destination, dates, pace, selected interests and names of places already in the plan are sent through the app's server function to the Google Gemini API. No names or email addresses are sent, and the server function does not store requests.</li>
+      <li><b>Add from photo (Google Gemini)</b>: photos you pick in "Add from photo" are resized to 1280px and sent through the same server function to the Gemini API to read the shop name, date and amount. The photo's GPS location is not sent and is used only on your device. When place names are translated, only the place names from search results are sent.</li>
       <li><b>Maps (OpenFreeMap)</b>: map tiles for the area you are viewing are downloaded.</li>
       <li><b>Place search (OpenStreetMap Nominatim)</b>: the place name you type is sent.</li>
       <li><b>Hosting (Cloudflare)</b>: Cloudflare may process connection logs (such as IP addresses) while delivering the app.</li>

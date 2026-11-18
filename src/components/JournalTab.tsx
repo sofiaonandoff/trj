@@ -1,12 +1,14 @@
 import { tr } from '../i18n'
-import { Camera, Cloud, CloudOff, ImageOff, Images, X } from 'lucide-react'
+import { Camera, Cloud, CloudOff, Clapperboard, Copy, ImageDown, ImageOff, Images, X } from 'lucide-react'
 import { useState } from 'react'
 import { connectDrive, driveConfigured, useDriveStatus } from '../lib/drive'
 import { isBackedUp, removePhoto, savePhoto, usePhoto } from '../lib/photos'
+import { toMarkdown, toYouTube } from '../lib/share'
 import { md, weekday } from '../lib/util'
 import { useStore } from '../store'
 import type { Trip } from '../types'
-import { toast } from './ui'
+import ExportSheet from './ExportSheet'
+import { copy, toast } from './ui'
 
 function Photo({ k, onRemove }: { k: string; onRemove: () => void }) {
   const url = usePhoto(k)
@@ -24,6 +26,7 @@ export default function JournalTab({ trip }: { trip: Trip }) {
   const mutate = useStore((s) => s.mutate)
   const drive = useDriveStatus()
   const [busy, setBusy] = useState(false)
+  const [exporting, setExporting] = useState(false)
 
   const store = async (files: File[]) => {
     const saved = []
@@ -37,7 +40,12 @@ export default function JournalTab({ trip }: { trip: Trip }) {
   const addPhotos = async (date: string, files: FileList | null) => {
     if (!files?.length) return
     const saved = await store([...files])
-    mutate(trip.id, (t) => { (t.journal[date] ??= { text: '', photos: [] }).photos.push(...saved.map((s) => s.key)) })
+    // 다른 날 찍은 사진을 이 날에 넣었으면 찍은 날로 옮겨 넣는다
+    const dates = trip.days.map((d) => d.date)
+    const target = (s: { date?: string }) => (s.date && dates.includes(s.date) ? s.date : date)
+    mutate(trip.id, (t) => { for (const s of saved) (t.journal[target(s)] ??= { text: '', photos: [] }).photos.push(s.key) })
+    const moved = [...new Set(saved.map(target).filter((d) => d !== date))]
+    if (moved.length) toast(tr('{0}장은 찍은 날짜에 맞춰 {1}에 넣었습니다', saved.filter((s) => target(s) !== date).length, moved.map((d) => tr('{0}일차', dates.indexOf(d) + 1)).join(', ')))
   }
 
   /** 여러 장을 한 번에: 찍은 날짜를 읽어 그 날의 기록에 넣는다 */
@@ -70,6 +78,16 @@ export default function JournalTab({ trip }: { trip: Trip }) {
 
   return (
     <>
+      <section className="panel">
+        <h2>{tr('여행 기록 내보내기')}</h2>
+        <div className="list export-list">
+          <button onClick={() => setExporting(true)}><ImageDown size={20} /><span className="grow"><b>{tr('이미지로 내보내기')}</b><small>{tr('템플릿 3가지, 스토리·피드·영상용 비율')}</small></span></button>
+          <button onClick={() => copy(toMarkdown(trip), tr('블로그용 글을 복사했습니다'))}><Copy size={20} /><span className="grow"><b>{tr('블로그용 글 복사')}</b><small>{tr('날짜별 코스와 아래에 적은 기록을 마크다운으로')}</small></span></button>
+          <button onClick={() => copy(toYouTube(trip), tr('영상 설명란용 글을 복사했습니다'))}><Clapperboard size={20} /><span className="grow"><b>{tr('유튜브 설명란용 복사')}</b><small>{tr('DAY별 코스 요약과 해시태그')}</small></span></button>
+        </div>
+      </section>
+      <ExportSheet trip={trip} open={exporting} onClose={() => setExporting(false)} />
+
       <section className="panel photo-bar">
         <div className="between">
           <div>

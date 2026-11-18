@@ -37,6 +37,42 @@ const TRIP_SCHEMA = {
   required: ['days'],
 }
 const MORE_SCHEMA = { type: 'object', properties: { items: { type: 'array', items: PLACE } }, required: ['items'] }
+const NAMES_SCHEMA = { type: 'object', properties: { names: { type: 'array', items: { type: 'string' } } }, required: ['names'] }
+const EXPENSE_CATS = ['food', 'stay', 'move', 'play', 'shop', 'etc'] as const
+const PHOTO_SCHEMA = {
+  type: 'object',
+  properties: {
+    items: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          kind: { type: 'string', enum: ['place', 'expense', 'flight'], description: 'place: somewhere the traveler visits (restaurant, sight, shop, hotel). expense: a cost with no place to visit (taxi, SIM card, transit card). flight: a flight ticket or boarding pass' },
+          name: { type: 'string', description: 'Place or item name' },
+          address: { type: 'string', description: 'Street address or area if visible, else empty' },
+          lat: { type: 'number', description: 'Real latitude if you know the place, else 0' },
+          lng: { type: 'number', description: 'Real longitude if you know the place, else 0' },
+          category: { type: 'string', enum: [...CATEGORIES] },
+          date: { type: 'string', description: 'Date of the visit or payment shown in the image as YYYY-MM-DD, else empty. For a hotel booking use the check-in date' },
+          time: { type: 'string', description: 'Time shown in the image as 24-hour HH:MM, else empty' },
+          duration: { type: 'integer', description: 'Likely minutes spent there' },
+          amount: { type: 'number', description: 'Total paid as printed, 0 if no price' },
+          currency: { type: 'string', description: 'ISO 4217 code of amount, empty if no price' },
+          amount_krw: { type: 'integer', description: 'amount converted to Korean won with a recent rate, 0 if no price' },
+          expense_category: { type: 'string', enum: [...EXPENSE_CATS] },
+          note: { type: 'string', description: 'One short useful detail (booking number, what was ordered)' },
+          flight_no: { type: 'string' }, from_iata: { type: 'string' }, to_iata: { type: 'string' },
+          dep_date: { type: 'string' }, dep_time: { type: 'string' }, arr_date: { type: 'string' }, arr_time: { type: 'string' },
+          seat: { type: 'string' }, pnr: { type: 'string' },
+        },
+        required: ['kind', 'name', 'category', 'date', 'time', 'amount', 'currency', 'amount_krw', 'expense_category', 'note'],
+      },
+    },
+  },
+  required: ['items'],
+}
+/** 브라우저가 줄여 보낸 사진만 받는다 (base64 약 2MB 이하) */
+const MAX_IMAGE = 2_800_000
 
 const str = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '')
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
@@ -54,11 +90,50 @@ function common(lang: string) {
   ].join('\n')
 }
 
-function buildPrompt(b: Record<string, unknown>): { prompt: string; schema: object } | { error: string } {
+type Built = { prompt: string; schema: object; image?: { data: string; mime: string } }
+function buildPrompt(b: Record<string, unknown>): Built | { error: string } {
+  const lang = b.lang === 'en' ? 'en' : 'ko'
+  if (b.mode === 'names') {
+    const names = Array.isArray(b.names) ? b.names.map((x) => str(x, 120)).filter(Boolean).slice(0, 12) : []
+    if (!names.length) return { error: 'bad_request' }
+    const language = lang === 'en' ? 'English' : 'Korean'
+    return {
+      schema: NAMES_SCHEMA,
+      prompt: [
+        `Write each place name the way it is usually written in ${language}${str(b.city, 80) ? ` (the places are in or near ${str(b.city, 80)})` : ''}.`,
+        lang === 'ko' ? 'Use the common Korean name or a natural Hangul transliteration. Keep brand names that Koreans write in Latin letters as they are.' : 'Use the common English name or a standard romanization.',
+        `Return "names" with exactly ${names.length} strings in the same order.`,
+        ...names.map((n, i) => `${i + 1}. ${n}`),
+      ].join('\n'),
+    }
+  }
+  if (b.mode === 'photo') {
+    const img = b.image as { data?: unknown; mime?: unknown } | undefined
+    const data = typeof img?.data === 'string' ? img.data : ''
+    const mime = typeof img?.mime === 'string' && /^image\/(jpeg|png|webp)$/.test(img.mime) ? img.mime : 'image/jpeg'
+    if (!data || data.length > MAX_IMAGE || !/^[A-Za-z0-9+/=]+$/.test(data.slice(0, 200))) return { error: 'bad_request' }
+    const language = lang === 'en' ? 'English' : 'Korean'
+    const taken = str(b.taken, 20)
+    return {
+      schema: PHOTO_SCHEMA,
+      image: { data, mime },
+      prompt: [
+        `A traveler on a trip to ${[str(b.city, 80), str(b.country, 60)].filter(Boolean).join(', ') || 'somewhere'}${isDate(b.start) && isDate(b.end) ? ` from ${b.start} to ${b.end}` : ''} added this image to their itinerary.`,
+        'It may be a receipt, a booking or ticket screenshot, a boarding pass, a map or listing screenshot, a menu, or a photo of a place or sign.',
+        'Read it and return what should go into the itinerary and the budget. Usually one item; return several only if the image clearly lists several separate bookings or places.',
+        taken ? `The photo was taken on ${taken}. Use that only if the image itself shows no date.` : '',
+        '- Read dates and times only from the image (or the photo date above). A date printed without a year is in the trip year.',
+        '- For a receipt from a shop or restaurant, kind is "place" and name is the shop name.',
+        '- For a boarding pass or flight ticket, kind is "flight" and fill the flight fields with IATA codes and 24-hour times.',
+        '- If the image shows nothing useful for a trip, return an empty "items".',
+        `- Write "name" and "note" in ${language}, as the place is usually written in ${language}.`,
+        'Return JSON only.',
+      ].filter(Boolean).join('\n'),
+    }
+  }
   const city = str(b.city, 80)
   if (!city) return { error: 'bad_request' }
   const where = [city, str(b.country, 60)].filter(Boolean).join(', ')
-  const lang = b.lang === 'en' ? 'en' : 'ko'
   const interests = Array.isArray(b.interests) ? b.interests.filter((x): x is string => CATEGORIES.includes(x as never)) : []
   const arrive = str(b.arrive, 120)
   const depart = str(b.depart, 120)
@@ -127,21 +202,24 @@ export async function handlePlan(body: unknown, env: PlanEnv): Promise<PlanResul
   let last = { status: 502, detail: 'no response' }
   let busyCount = 0
   // 추가 추천은 빨라야 하므로 생각 단계를 거의 생략하고, 일정 전체는 조금만 생각하게 한다
-  const quick = (body as Record<string, unknown>).mode === 'more'
-  const perTry = quick ? 18_000 : 45_000
-  const budget = quick ? 32_000 : 85_000
+  const mode = (body as Record<string, unknown>).mode
+  const quick = mode === 'more' || mode === 'names' || mode === 'photo'
+  const perTry = mode === 'names' ? 10_000 : quick ? 20_000 : 45_000
+  const budget = mode === 'names' ? 15_000 : quick ? 34_000 : 85_000
   const began = Date.now()
   for (const model of models) {
     const remaining = budget - (Date.now() - began)
     if (remaining < 4_000) { last = { status: 504, detail: 'time budget' }; break }
     // 2.x 모델은 thinking_level을 받지 않는다
-    const generation_config = model.startsWith('gemini-2') ? undefined : { thinking_level: quick ? 'minimal' : 'low' }
+    const generation_config = model.startsWith('gemini-2') ? undefined : { thinking_level: quick && mode !== 'photo' ? 'minimal' : 'low' }
     let res: Response
     try {
       res = await fetch(`${base}/v1beta/interactions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY },
-        body: JSON.stringify({ model, input: built.prompt, generation_config, response_format: { type: 'text', mime_type: 'application/json', schema: built.schema } }),
+        body: JSON.stringify({
+          model, generation_config,
+          input: built.image ? [{ type: 'text', text: built.prompt }, { type: 'image', data: built.image.data, mime_type: built.image.mime }] : built.prompt, response_format: { type: 'text', mime_type: 'application/json', schema: built.schema } }),
         signal: AbortSignal.timeout(Math.min(perTry, remaining)),
       })
     } catch (e) {

@@ -3,14 +3,16 @@ import { del, get, set } from 'idb-keyval'
 import { useEffect, useState } from 'react'
 import { uid } from './util'
 
+export interface Exif { date?: string; time?: string; lat?: number; lng?: number }
+
 /**
- * JPEG의 EXIF에서 찍은 날짜(DateTimeOriginal)를 읽는다. 없으면 undefined.
+ * JPEG의 EXIF에서 찍은 날짜·시각(DateTimeOriginal)과 GPS 위치를 읽는다. 없으면 빈 객체.
  * 사진을 줄이면 EXIF가 사라지므로 원본 파일에서 먼저 읽는다.
  */
-export async function takenDate(file: Blob): Promise<string | undefined> {
+export async function readExif(file: Blob): Promise<Exif> {
   try {
     const v = new DataView(await file.slice(0, 256 * 1024).arrayBuffer())
-    if (v.getUint16(0) !== 0xffd8) return undefined
+    if (v.getUint16(0) !== 0xffd8) return {}
     let o = 2
     while (o + 4 < v.byteLength) {
       const marker = v.getUint16(o), size = v.getUint16(o + 2)
@@ -29,18 +31,51 @@ export async function takenDate(file: Blob): Promise<string | undefined> {
           for (let i = 0; i < len - 1; i++) s += String.fromCharCode(v.getUint8(t + at + i))
           return s
         }
+        const out: Exif = {}
         const ifd0 = u32(4)
         const exifPtr = find(ifd0, 0x8769)
         const original = exifPtr >= 0 ? find(u32(exifPtr + 8), 0x9003) : -1
         const any = original >= 0 ? original : find(ifd0, 0x0132) // 없으면 수정한 날짜
-        const m = any >= 0 ? ascii(any).match(/^(\d{4}):(\d{2}):(\d{2})/) : null
-        return m ? `${m[1]}-${m[2]}-${m[3]}` : undefined
+        const m = any >= 0 ? ascii(any).match(/^(\d{4}):(\d{2}):(\d{2})(?: (\d{2}):(\d{2}))?/) : null
+        if (m) { out.date = `${m[1]}-${m[2]}-${m[3]}`; if (m[4]) out.time = `${m[4]}:${m[5]}` }
+        const gpsPtr = find(ifd0, 0x8825)
+        if (gpsPtr >= 0) {
+          const gps = u32(gpsPtr + 8)
+          const deg = (tag: number) => {
+            const e = find(gps, tag)
+            if (e < 0) return undefined
+            const at = u32(e + 8)
+            const r = (k: number) => u32(at + k * 8) / (u32(at + k * 8 + 4) || 1)
+            return r(0) + r(1) / 60 + r(2) / 3600
+          }
+          const ref = (tag: number) => { const e = find(gps, tag); return e >= 0 ? String.fromCharCode(v.getUint8(t + e + 8)) : '' }
+          const lat = deg(2), lng = deg(4)
+          if (lat !== undefined && lng !== undefined && (lat || lng)) {
+            out.lat = ref(1) === 'S' ? -lat : lat
+            out.lng = ref(3) === 'W' ? -lng : lng
+          }
+        }
+        return out
       }
-      if ((marker & 0xff00) !== 0xff00) return undefined
+      if ((marker & 0xff00) !== 0xff00) return {}
       o += 2 + size
     }
-  } catch { /* 읽을 수 없는 파일은 날짜 없이 둔다 */ }
-  return undefined
+  } catch { /* 읽을 수 없는 파일은 정보 없이 둔다 */ }
+  return {}
+}
+
+export const takenDate = async (file: Blob) => (await readExif(file)).date
+
+/** AI에게 보낼 만큼 사진을 줄여 base64 JPEG로 만든다 */
+export async function toBase64Jpeg(file: Blob, max = 1280): Promise<string> {
+  const bmp = await createImageBitmap(file)
+  const scale = Math.min(1, max / Math.max(bmp.width, bmp.height))
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.round(bmp.width * scale)
+  canvas.height = Math.round(bmp.height * scale)
+  canvas.getContext('2d')!.drawImage(bmp, 0, 0, canvas.width, canvas.height)
+  const url = canvas.toDataURL('image/jpeg', 0.8)
+  return url.slice(url.indexOf(',') + 1)
 }
 
 /** 사진을 긴 변 1600px JPEG로 줄여 이 기기의 IndexedDB에 저장한다. 키와 찍은 날짜를 돌려준다 */

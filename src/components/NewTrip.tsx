@@ -6,7 +6,7 @@ import { EN } from '../i18n.en'
 import { CATEGORY, DESTINATIONS, type Destination } from '../data/destinations'
 import { aiMessage, aiPlanTrip } from '../lib/ai'
 import { driveConfigured, ensureToken, inviteByEmail, joinLink, preloadGoogle, startSharing } from '../lib/drive'
-import { searchPlaces, type GeoResult } from '../lib/geocode'
+import { localizeResults, searchPlaces, type GeoResult } from '../lib/geocode'
 import { cityLabel, legEnds, splitDates } from '../lib/legs'
 import { PACE, type Pace } from '../lib/planner'
 import { addDays, dateRange, fmtRange, haptic, md, today, weekday } from '../lib/util'
@@ -44,7 +44,11 @@ export default function NewTrip() {
     if (q.trim().length < 2) { setResults(undefined); return }
     const ac = new AbortController()
     const id = setTimeout(() => {
-      searchPlaces(q, undefined, ac.signal).then((r) => { setResults(r.filter((x) => !x.airport)); setSearchError('') })
+      searchPlaces(q, undefined, ac.signal).then((all) => {
+        const r = all.filter((x) => !x.airport)
+        setResults(r); setSearchError('')
+        localizeResults(r).then((l) => { if (!ac.signal.aborted && l !== r) setResults(l) })
+      })
         .catch((e) => { if (e.name !== 'AbortError') setSearchError(tr('검색하지 못했습니다. 연결을 확인한 뒤 다시 입력하세요')) })
     }, 500)
     return () => { clearTimeout(id); ac.abort() }
