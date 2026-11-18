@@ -9,6 +9,8 @@ import { parseTripFile } from '../lib/share'
 import { useStore } from '../store'
 import type { Trip } from '../types'
 import { LangButton, Logo, Sheet, copy, go, toast } from './ui'
+import InviteSend from './InviteSend'
+import { inviteText, type Invitee } from '../lib/invite'
 
 const fail = (e: unknown) => toast((e as Error).message || tr('문제가 생겼습니다. 다시 시도하세요'))
 const ago = (iso: string) => {
@@ -93,6 +95,7 @@ export function CoEdit({ trip }: { trip: Trip }) {
   const [busy, setBusy] = useState(false)
   const [email, setEmail] = useState('')
   const [editors, setEditors] = useState<Editor[]>()
+  const [sent, setSent] = useState<Invitee[]>([])
   const fileId = trip.drive?.fileId
   const role = trip.drive?.role
   const live = status.kind === 'idle' || status.kind === 'syncing'
@@ -116,12 +119,16 @@ export function CoEdit({ trip }: { trip: Trip }) {
   }
 
   const send = async () => {
-    if (navigator.share) { try { await navigator.share({ title: trip.title, text: tr('{0} 일정을 함께 짜요', trip.title), url: link }); return } catch { /* 공유 창을 닫으면 복사로 넘어간다 */ } }
-    copy(link, tr('초대 링크를 복사했습니다'))
+    const { subject, body } = inviteText(trip.title, link)
+    if (navigator.share) { try { await navigator.share({ title: subject, text: body }); return } catch { /* 공유 창을 닫으면 복사로 넘어간다 */ } }
+    copy(body, tr('초대 문구를 복사했습니다. 메시지에 붙여 넣으세요'))
   }
   const invite = () => run(async () => {
-    await inviteByEmail(fileId, email, tr('{0} 일정을 함께 짜요. 아래 링크를 열고 이 메일을 받은 Google 계정으로 로그인하세요.\n{1}', trip.title, link))
-    toast(tr('{0} 님에게 초대 메일을 보냈습니다', email.trim())); setEmail(''); setEditors(await listEditors(fileId))
+    const to = email.trim()
+    const { notified } = await inviteByEmail(fileId, to, tr('{0} 일정을 함께 짜요. 아래 링크를 열고 이 메일을 받은 Google 계정으로 로그인하세요.\n{1}', trip.title, link))
+    const who = trip.members.find((m) => m.email?.toLowerCase() === to.toLowerCase())?.name ?? to.split('@')[0]
+    setSent((s) => [...s.filter((x) => x.email !== to), { name: who, email: to, notified }])
+    toast(tr('편집 권한을 줬습니다. 초대장을 보내세요')); setEmail(''); setEditors(await listEditors(fileId))
   })
 
   return (
@@ -136,7 +143,8 @@ export function CoEdit({ trip }: { trip: Trip }) {
             <input className="input" type="email" inputMode="email" placeholder={tr('동행의 Google 계정 이메일')} value={email} onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && email.includes('@') && invite()} />
             <button className="btn btn-primary" disabled={busy || !email.includes('@') || !live} onClick={invite}>{tr('초대')}</button>
           </div>
-          <p className="hint">{tr('초대한 계정만 열 수 있습니다. 메일이 안 보이면 아래 링크를 직접 보내세요.')}</p>
+          <p className="hint">{tr('초대한 Google 계정만 열 수 있습니다. 권한을 준 뒤 trj 링크가 담긴 초대장을 보내세요.')}</p>
+          {sent.length > 0 && <InviteSend title={trip.title} link={link} people={sent} onDone={() => setSent([])} />}
           {editors && editors.length > 0 && (
             <div className="list" style={{ marginTop: 10 }}>
               {editors.map((m) => (
@@ -176,7 +184,7 @@ export function JoinPage({ fileId }: { fileId: string }) {
         <h1>{tr('함께 짜는 여행에 초대받았습니다')}</h1>
       </header>
       <main className="pad stack" style={{ paddingTop: 24, paddingBottom: 40 }}>
-        <p className="mute">{tr('초대 메일을 받은 Google 계정으로 열면 일정·항공편·예산·준비물을 동행과 함께 고칠 수 있습니다. Google 화면이 뜨면 초대받은 여행 파일을 한 번 선택하세요. TRJ는 그 파일에만 접근합니다.')}</p>
+        <p className="mute">{tr('초대받은 Google 계정으로 열면 일정·항공편·예산·준비물을 동행과 함께 고칠 수 있습니다. Google 화면이 뜨면 초대받은 여행 파일을 한 번 선택하세요. TRJ는 그 파일에만 접근합니다.')}</p>
         {driveConfigured && sharingConfigured
           ? <button className="btn btn-primary btn-block" disabled={busy} onClick={() => open()}>{busy ? tr('여는 중') : tr('Google 계정으로 열기')}</button>
           : <p className="parsed miss">{tr('이 TRJ에는 Google 연결 설정이 없어 초대 링크를 열 수 없습니다.')}</p>}

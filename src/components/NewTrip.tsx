@@ -13,6 +13,7 @@ import { addDays, dateRange, fmtRange, haptic, md, today, weekday } from '../lib
 import { buildTrip, planBuiltIn, useStore, type Person } from '../store'
 import type { Category } from '../types'
 import { go, toast } from './ui'
+import { announceInvites, type Invitee } from '../lib/invite'
 
 const INTERESTS: Category[] = ['food', 'cafe', 'sight', 'culture', 'nature', 'shop', 'night']
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -130,21 +131,23 @@ export default function NewTrip() {
     go(`/trip/${trip.id}`, true)
     if (note) toast(note)
 
-    // 이메일을 넣은 동행에게 함께 편집 초대장을 보낸다
+    // 이메일을 넣은 동행에게 편집 권한을 주고, 여행 화면에서 trj 링크가 담긴 초대장을 보내게 한다
+    // (Google 공유 알림 메일은 여행 파일(.json)을 앞세워 보여 주므로 보내지 않는다)
     if (invites.length && (await signIn)) {
       try {
         const fileId = await startSharing(trip.id)
-        const sent: string[] = []
+        const sent: Invitee[] = []
         for (const p of invites) {
           try {
-            await inviteByEmail(fileId, p.email!, tr('{0} 일정을 함께 짜요. 아래 링크를 열고 이 메일을 받은 Google 계정으로 로그인하세요.\n{1}', trip.title, joinLink(fileId)))
-            sent.push(p.name)
-          } catch { /* 한 사람이 실패해도 나머지는 보낸다 */ }
+            const { notified } = await inviteByEmail(fileId, p.email!, tr('{0} 일정을 함께 짜요. 아래 링크를 열고 이 메일을 받은 Google 계정으로 로그인하세요.\n{1}', trip.title, joinLink(fileId)))
+            sent.push({ name: p.name, email: p.email!, notified })
+          } catch { /* 한 사람이 실패해도 나머지는 계속한다 */ }
         }
-        toast(sent.length === invites.length ? tr('{0}명에게 함께 편집 초대장을 보냈습니다', sent.length) : tr('초대장을 {0}명 중 {1}명에게 보냈습니다. 나머지는 공유 화면에서 다시 보내세요', invites.length, sent.length))
+        if (sent.length) announceInvites(trip.id, sent)
+        if (sent.length < invites.length) toast(tr('{0}명 중 {1}명에게 편집 권한을 줬습니다. 나머지는 동행 관리에서 다시 초대하세요', invites.length, sent.length))
       } catch (e) { toast((e as Error).message) }
     } else if (invites.length) {
-      toast(tr('Google에 연결하지 않아 초대장을 보내지 못했습니다. 공유 화면에서 보낼 수 있습니다'))
+      toast(tr('Google에 연결하지 않아 초대하지 못했습니다. 동행 관리에서 초대할 수 있습니다'))
     }
   }
 

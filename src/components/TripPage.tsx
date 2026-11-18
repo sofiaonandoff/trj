@@ -1,7 +1,8 @@
 import { tr } from '../i18n'
 import { motion } from 'framer-motion'
 import { ArrowLeft, BookOpen, Download, Link2, ListChecks, MoreHorizontal, Route, Share2, UserPlus, Wallet } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { onAnnounced, takeAnnounced, type Invitee } from '../lib/invite'
 import { shareLink } from '../lib/share'
 import { diffDays, download, fmtRange, haptic, today } from '../lib/util'
 import { useStore } from '../store'
@@ -30,6 +31,14 @@ export default function TripPage({ id }: { id: string }) {
   const [sharing, setSharing] = useState(false)
   const [managing, setManaging] = useState(false)
   const [people, setPeople] = useState(false)
+  const [invites, setInvites] = useState<Invitee[]>()
+  // 새 여행을 만들며 편집 권한을 준 동행이 있으면, 동행 관리를 열어 초대장을 보내게 한다
+  useEffect(() => {
+    const show = (p: Invitee[]) => { setInvites(p); setPeople(true) }
+    const waiting = takeAnnounced(id)
+    if (waiting) show(waiting)
+    return onAnnounced(id, show)
+  }, [id])
 
   if (!trip) {
     return (
@@ -77,7 +86,7 @@ export default function TripPage({ id }: { id: string }) {
       </nav>
 
       <TripSettings trip={trip} open={managing} onClose={() => setManaging(false)} />
-      <Companions trip={trip} open={people} onClose={() => setPeople(false)} />
+      <Companions trip={trip} open={people} invites={invites} onClose={() => { setPeople(false); setInvites(undefined) }} />
       <ShareSheet trip={trip} open={sharing} onClose={() => setSharing(false)} onJournal={() => { setTab('journal'); scrollTo(0, 0) }} onManage={() => setManaging(true)} />
     </div>
   )

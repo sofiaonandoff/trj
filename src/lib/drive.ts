@@ -333,7 +333,6 @@ export async function listEditors(fileId: string): Promise<Editor[]> {
   return list.filter((p) => p.type === 'user').map((p) => ({ id: p.id, role: p.role, email: p.emailAddress, name: p.displayName }))
 }
 
-/** 이메일로 편집자를 초대한다. Google이 초대 메일을 보내고, 메일에 TRJ 링크가 들어간다 */
 /**
  * 내가 만든 여행 파일과 그 여행의 사진을 Drive 휴지통으로 옮긴다 (Drive에서 30일 안에 되살릴 수 있다).
  * 다른 사람이 만든 함께 편집 여행은 건드리지 않는다. 파일을 옮겼으면 true.
@@ -351,12 +350,25 @@ export async function trashTrip(t: Trip): Promise<boolean> {
   return true
 }
 
-export async function inviteByEmail(fileId: string, email: string, message: string) {
-  const params = new URLSearchParams({ sendNotificationEmail: 'true', emailMessage: message, fields: 'id' })
-  const r = await api(`${API}/files/${fileId}/permissions?${params}`, {
+/**
+ * 이메일 주인에게 편집 권한을 준다. Google의 공유 알림 메일은 보내지 않는다:
+ * 그 메일은 여행 파일(.json)을 크게 보여 줘서 trj 링크 대신 파일을 열게 만든다. 초대장은 trj가 따로 보낸다 (invite.ts).
+ * Google 계정이 아닌 주소처럼 Google이 알림을 꼭 보내야 하는 경우에만 알림 메일로 보낸다.
+ * 알림 메일이 갔으면 notified가 true.
+ */
+export async function inviteByEmail(fileId: string, email: string, message: string): Promise<{ notified: boolean }> {
+  const post = (notify: boolean) => api(`${API}/files/${fileId}/permissions?${new URLSearchParams({ sendNotificationEmail: String(notify), ...(notify ? { emailMessage: message } : {}), fields: 'id' })}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'user', role: 'writer', emailAddress: email.trim() }),
   })
-  if (!r.ok) throw new Error(tr('초대하지 못했습니다. Google 계정 이메일이 맞는지 확인하세요'))
+  let r = await post(false)
+  if (r.ok) return { notified: false }
+  // 알림 없이는 공유할 수 없는 주소 (Google 계정이 아닌 이메일 등)
+  const detail = await r.text().catch(() => '')
+  if ((r.status === 400 || r.status === 403) && /notif|invalidSharingRequest|not a google account|no google account/i.test(detail)) {
+    r = await post(true)
+    if (r.ok) return { notified: true }
+  }
+  throw new Error(tr('초대하지 못했습니다. Google 계정 이메일이 맞는지 확인하세요'))
 }
 
 export async function removeEditor(fileId: string, permissionId: string) {

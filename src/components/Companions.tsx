@@ -7,6 +7,8 @@ import { uid } from '../lib/util'
 import { MEMBER_COLORS, useStore } from '../store'
 import type { Trip } from '../types'
 import { Avatar, Sheet, copy, toast } from './ui'
+import InviteSend from './InviteSend'
+import type { Invitee } from '../lib/invite'
 
 const same = (a?: string, b?: string) => Boolean(a && b && a.trim().toLowerCase() === b.trim().toLowerCase())
 const fail = (e: unknown) => toast((e as Error).message || tr('문제가 생겼습니다. 다시 시도하세요'))
@@ -19,7 +21,7 @@ type Person = PersonOf<Editor>
  * - 이메일을 넣으면 함께 편집 초대가 가고, 그 사람도 같은 여행을 고칠 수 있다
  * - 동행의 이메일과 Drive 편집자의 이메일이 같으면 한 사람으로 보여 준다
  */
-export default function Companions({ trip, open, onClose }: { trip: Trip; open: boolean; onClose: () => void }) {
+export default function Companions({ trip, open, onClose, invites }: { trip: Trip; open: boolean; onClose: () => void; invites?: Invitee[] }) {
   const mutate = useStore((s) => s.mutate)
   const status = useDriveStatus()
   const [editors, setEditors] = useState<Editor[]>()
@@ -28,26 +30,30 @@ export default function Companions({ trip, open, onClose }: { trip: Trip; open: 
   const [busy, setBusy] = useState(false)
   const [renaming, setRenaming] = useState<{ id: string; name: string }>()
   const [inviting, setInviting] = useState<{ id: string; email: string }>()
+  /** 편집 권한을 줬고, 아직 초대장을 보내야 하는 사람들 */
+  const [sent, setSent] = useState<Invitee[]>([])
   const fileId = trip.drive?.fileId
   const role = trip.drive?.role
   const owner = !role || role === 'owner'
   const live = status.kind === 'idle' || status.kind === 'syncing'
 
   const refresh = async (id = fileId) => { if (id && tokenValid() && (role === 'owner' || !role)) setEditors(await listEditors(id).catch(() => undefined)) }
-  useEffect(() => { if (open) { setName(''); setEmail(''); setRenaming(undefined); setInviting(undefined); void refresh() } }, [open, fileId, live]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (open) { setName(''); setEmail(''); setRenaming(undefined); setInviting(undefined); setSent(invites ?? []) } }, [open, invites])
+  useEffect(() => { if (open) void refresh() }, [open, fileId, live]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // 동행과 편집자를 이메일로 묶는다. 여행 주인(Drive owner)은 첫 동행 '나'로 본다
   const people = useMemo(() => mergePeople(trip.members, editors ?? []), [trip.members, editors])
 
   const run = async (fn: () => Promise<unknown>) => { setBusy(true); try { await fn() } catch (e) { fail(e) } finally { setBusy(false) } }
 
-  /** 함께 편집이 안 켜져 있으면 켜고, 초대 메일을 보낸다 */
-  const sendInvite = async (to: string) => {
+  /** 함께 편집이 안 켜져 있으면 켜고 편집 권한을 준 뒤, 초대장 보내기 칸에 올린다 */
+  const sendInvite = async (to: string, who: string) => {
     if (!driveConfigured) throw new Error(tr('이 앱에는 Google Drive 연결이 설정되어 있지 않습니다'))
     if (!owner) throw new Error(tr('초대받아 함께 고치는 여행입니다. 다른 사람 초대는 여행 주인이 할 수 있습니다.'))
     await ensureToken()
     const id = fileId && role ? fileId : await startSharing(trip.id)
-    await inviteByEmail(id, to, tr('{0} 일정을 함께 짜요. 아래 링크를 열고 이 메일을 받은 Google 계정으로 로그인하세요.\n{1}', trip.title, joinLink(id)))
+    const { notified } = await inviteByEmail(id, to, tr('{0} 일정을 함께 짜요. 아래 링크를 열고 이 메일을 받은 Google 계정으로 로그인하세요.\n{1}', trip.title, joinLink(id)))
+    setSent((s) => [...s.filter((x) => !same(x.email, to)), { name: who, email: to, notified }])
     await refresh(id)
   }
 
@@ -60,7 +66,7 @@ export default function Companions({ trip, open, onClose }: { trip: Trip; open: 
     if (e && trip.members.some((m) => same(m.email, e))) { toast(tr('이미 들어 있는 이메일입니다')); return }
     mutate(trip.id, (t) => { t.members.push({ id: uid(), name: n, color: MEMBER_COLORS[t.members.length % MEMBER_COLORS.length], email: e || undefined }) })
     setName(''); setEmail('')
-    if (e) { await sendInvite(e); toast(tr('{0} 님을 넣고 초대 메일을 보냈습니다', n)) } else toast(tr('{0} 님을 넣었습니다', n))
+    if (e) { await sendInvite(e, n); toast(tr('{0} 님을 넣고 편집 권한을 줬습니다. 초대장을 보내세요', n)) } else toast(tr('{0} 님을 넣었습니다', n))
   })
 
   const remove = (p: Person) => run(async () => {
@@ -96,21 +102,22 @@ export default function Companions({ trip, open, onClose }: { trip: Trip; open: 
     if (!/^\S+@\S+\.\S+$/.test(e)) { toast(tr('이메일 주소를 확인하세요')); return }
     mutate(trip.id, (t) => { const m = t.members.find((x) => x.id === inviting.id); if (m) m.email = e })
     setInviting(undefined)
-    await sendInvite(e)
-    toast(tr('{0} 주소로 초대 메일을 보냈습니다', e))
+    await sendInvite(e, trip.members.find((x) => x.id === inviting.id)?.name ?? e)
+    toast(tr('편집 권한을 줬습니다. 초대장을 보내세요'))
   })
 
   const statusOf = (p: Person) => {
     if (p.me) return p.editor ? tr('나 · 여행 주인') : tr('여행을 만든 사람')
     if (p.editor && !p.member) return tr('편집 가능 · 동행 목록에는 없음')
     if (p.editor) return tr('함께 편집 중')
-    if (p.member?.email) return role ? tr('초대 메일 보냄 · 확인 중') : tr('이메일만 있음 · 아직 초대 안 함')
+    if (p.member?.email) return role ? tr('초대함 · 아직 열지 않음') : tr('이메일만 있음 · 아직 초대 안 함')
     return tr('이름만 · 예산 나누기와 준비물 담당에 쓰임')
   }
 
   return (
     <Sheet open={open} onClose={onClose} title={tr('동행 관리')}>
       <div className="stack">
+        {fileId && sent.length > 0 && <InviteSend title={trip.title} link={joinLink(fileId)} people={sent} onDone={() => setSent([])} />}
         <div className="list people">
           {people.map((p) => {
             const m = p.member
@@ -140,7 +147,7 @@ export default function Companions({ trip, open, onClose }: { trip: Trip; open: 
                 {/* 이름만 있는 동행: 이메일 넣고 초대 / 편집자만 있는 사람: 동행 목록에 넣기 */}
                 {m && !p.me && !p.editor && owner && driveConfigured && inviting?.id !== m.id && (
                   <button className="icon-btn" disabled={busy} aria-label={tr('{0} 님 초대', m.name)}
-                    onClick={() => (m.email ? run(async () => { await sendInvite(m.email!); toast(tr('{0} 주소로 초대 메일을 다시 보냈습니다', m.email!)) }) : setInviting({ id: m.id, email: '' }))}>
+                    onClick={() => (m.email ? run(async () => { await sendInvite(m.email!, m.name) }) : setInviting({ id: m.id, email: '' }))}>
                     <Mail size={18} />
                   </button>
                 )}
@@ -160,7 +167,7 @@ export default function Companions({ trip, open, onClose }: { trip: Trip; open: 
         </div>
         <p className="hint" style={{ marginTop: -6 }}>
           {!driveConfigured ? tr('이름으로 넣은 동행은 예산 나누기와 준비물 담당에 쓰입니다.')
-            : owner ? tr('이메일을 넣으면 함께 편집 초대가 가서, 그 사람도 같은 여행을 고칠 수 있습니다. 이름만 넣으면 예산 나누기와 준비물 담당에만 쓰입니다.')
+            : owner ? tr('이메일을 넣으면 그 Google 계정에 편집 권한을 주고, trj 링크가 담긴 초대장을 보낼 수 있습니다. 이름만 넣으면 예산 나누기와 준비물 담당에만 쓰입니다.')
             : tr('초대받아 함께 고치는 여행입니다. 이름은 넣을 수 있지만, 다른 사람 초대는 여행 주인이 할 수 있습니다.')}
         </p>
         {fileId && role && (
