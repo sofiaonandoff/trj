@@ -1,4 +1,5 @@
 import { tr } from '../i18n'
+import { knownCurrency } from '../data/currencies'
 import type { Expense, Flight, Place, Stay, Trip } from '../types'
 import { loadWorldAirports } from '../data/airports'
 import { reverseGeocode, searchPlaces } from './geocode'
@@ -45,12 +46,14 @@ export function pickDate(days: string[], imageDate: string | undefined, photoDat
   return { date: current, from: 'current' }
 }
 
-/** 통화를 예산 탭이 계산할 수 있는 형태로 맞춘다: 원화, 여행지 통화, 아니면 원화로 바꾼 값 */
+/** 통화를 예산 탭이 계산할 수 있는 형태로 맞춘다: 원화, 여행지 통화, 아는 통화, 아니면 원화로 바꾼 값 */
 export function toBudget(trip: Pick<Trip, 'currency'>, amount: number, currency: string, krw: number): { amount: number; currency: string; extra?: string } | null {
   if (!(amount > 0)) return null
   const cur = currency.toUpperCase()
   if (cur === 'KRW') return { amount: Math.round(amount), currency: 'KRW' }
   if (!cur || cur === trip.currency) return { amount, currency: trip.currency }
+  // 아는 통화면 그 통화 그대로 남긴다 (예산 탭이 그 통화의 환율로 계산한다)
+  if (knownCurrency(cur)) return { amount, currency: cur }
   if (krw > 0) return { amount: Math.round(krw), currency: 'KRW', extra: `${amount.toLocaleString()} ${cur}` }
   return null
 }

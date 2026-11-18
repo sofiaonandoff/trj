@@ -9,7 +9,8 @@ check('사진 속 날짜가 여행 안이면 그 날', pickDate(days, '2026-12-0
 check('사진 속 날짜가 여행 밖이면 찍은 날', pickDate(days, '2026-11-20', '2026-12-03', '2026-12-02').date === '2026-12-03')
 check('둘 다 없으면 보고 있던 날', pickDate(days, undefined, undefined, '2026-12-02').from === 'current')
 check('여행지 통화는 그대로', toBudget({ currency: 'THB' }, 120, 'THB', 4800)?.currency === 'THB')
-check('다른 통화는 원화로', JSON.stringify(toBudget({ currency: 'THB' }, 10, 'USD', 14000)) === JSON.stringify({ amount: 14000, currency: 'KRW', extra: '10 USD' }))
+check('아는 다른 통화는 그 통화 그대로', JSON.stringify(toBudget({ currency: 'THB' }, 10, 'USD', 14000)) === JSON.stringify({ amount: 10, currency: 'USD' }))
+check('모르는 통화는 원화로', JSON.stringify(toBudget({ currency: 'THB' }, 10, 'XYZ', 14000)) === JSON.stringify({ amount: 14000, currency: 'KRW', extra: '10 XYZ' }))
 check('금액 없으면 기록 안 함', toBudget({ currency: 'THB' }, 0, 'THB', 0) === null)
 
 const trip = {

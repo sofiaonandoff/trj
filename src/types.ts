@@ -136,6 +136,8 @@ export interface Trip {
   journal: Record<string, JournalEntry>
   currency: string
   rate: number // 현지 통화 1단위 = 원
+  /** 여행지 통화가 아닌 다른 통화로 쓴 지출의 환율 (1단위 = 원). 없으면 기본 어림 환율 */
+  rates?: Record<string, number>
   budget: number // 원
   createdAt: number
   /** 여행 내용이 마지막으로 바뀐 시각 */
