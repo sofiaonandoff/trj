@@ -160,4 +160,6 @@ export interface DriveLink {
   modifiedBy?: string
   modifiedAt?: string
   error?: string
+  /** 로그인 없이 보는 링크를 켰을 때: 일정만 담은 공개 파일과, 마지막으로 올린 내용 */
+  view?: { fileId: string; sent?: string }
 }

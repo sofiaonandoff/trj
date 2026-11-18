@@ -3,6 +3,7 @@ import { useSyncExternalStore } from 'react'
 import { useStore } from '../store'
 import type { DriveLink, Trip } from '../types'
 import { mergeTrips, sameContent, shared } from './merge'
+import { viewOf } from './share'
 import { getPhoto, putPhoto, removePhoto, setRemotePhotoFetcher } from './photos'
 
 /**
@@ -224,7 +225,7 @@ function mergeIntoLocal(remote: Trip, link: Partial<DriveLink>) {
 async function syncTrip(tripId: string) {
   const t = store().trips.find((x) => x.id === tripId)
   if (!t) return
-  if (!t.drive?.fileId) return push(tripId)
+  if (!t.drive?.fileId) { await push(tripId); return publishView(tripId) }
   const meta = await remoteMeta(t.drive.fileId)
   if (!meta || meta.trashed) return t.drive.role === 'editor' ? lostAccess(t) : push(tripId)
   let needUpload = isPending(t)
@@ -237,6 +238,7 @@ async function syncTrip(tripId: string) {
     needUpload = differsFromRemote
   }
   if (needUpload) await push(tripId, t.drive.fileId)
+  await publishView(tripId)
 }
 
 /* ── 자동 동기화 ── */
@@ -257,7 +259,7 @@ export async function syncNow(opts: { pull?: boolean } = {}) {
   if (!meta.connected) return
   const trips = store().trips
   const pending = trips.filter(isPending)
-  const watched = opts.pull ? trips.filter((t) => t.drive?.fileId && t.drive.role && !isPending(t)) : []
+  const watched = opts.pull ? trips.filter((t) => t.drive?.fileId && (t.drive.role || t.drive.view) && !isPending(t)) : []
   if (!tokenValid()) return setStatus({ kind: 'reconnect', pending: pending.length })
   if (!navigator.onLine) return setStatus({ kind: 'offline' })
   const photosWaiting = localPhotoCount() > 0
@@ -294,7 +296,7 @@ export async function listBackups(): Promise<Backup[]> {
   const r = await api(`${API}/files?q=${q}&orderBy=modifiedTime desc&pageSize=100&fields=files(id,name,modifiedTime,appProperties)`)
   if (!r.ok) throw new Error(tr('Drive 목록을 받지 못했습니다'))
   const files = (await r.json()).files as { id: string; name: string; modifiedTime: string; appProperties?: { trjTripId?: string } }[]
-  return files.map((f) => ({ id: f.id, name: f.name.replace(/\.trj\.json$/, ''), modifiedTime: f.modifiedTime, tripId: f.appProperties?.trjTripId }))
+  return files.filter((f) => !f.name.endsWith('.trj-view.json')).map((f) => ({ id: f.id, name: f.name.replace(/\.trj\.json$/, ''), modifiedTime: f.modifiedTime, tripId: f.appProperties?.trjTripId }))
 }
 
 export async function restoreBackup(fileId: string): Promise<string> {
@@ -322,6 +324,69 @@ export async function startSharing(tripId: string): Promise<string> {
   }
   setStatus({ kind: 'idle', lastSync: Date.now() })
   return t.drive.fileId
+}
+
+/* ── 로그인 없이 보는 링크 ── */
+/*
+ * 여행 파일 자체를 공개하면 지출·이메일까지 보이므로, 일정만 담은 보기 파일(.trj-view.json)을 따로 만들어
+ * '링크가 있는 누구나 보기'로 연다. 여행이 Drive와 맞춰질 때마다 보기 파일도 새로 올린다.
+ * 받는 사람은 로그인 없이 API 키로 그 파일을 받는다 (사진과 같은 방법).
+ */
+export const viewLink = (viewFileId: string) => `${location.origin}${location.pathname}#/view/${viewFileId}`
+
+async function publishView(tripId: string) {
+  const t = store().trips.find((x) => x.id === tripId)
+  const v = t?.drive?.view
+  if (!t || !v || t.drive?.role === 'editor') return
+  const body = JSON.stringify(viewOf(t))
+  if (body === v.sent) return
+  try {
+    await upload('PATCH', `${UPLOAD}/files/${v.fileId}`, { name: `${t.title || tr('여행')}.trj-view.json` }, body)
+    store().patchDrive(tripId, { view: { fileId: v.fileId, sent: body } })
+  } catch (e) {
+    // 보기 파일을 누가 지웠으면 링크를 끈 것으로 본다
+    const st = (e as { status?: number }).status
+    if (st === 404) store().patchDrive(tripId, { view: undefined })
+    else if (e instanceof AuthError) throw e
+  }
+}
+
+/** 보기 링크를 켠다 (처음 한 번 Google 로그인). 보기 파일 id를 돌려준다 */
+export async function startViewLink(tripId: string): Promise<string> {
+  await ensureToken()
+  setStatus({ kind: 'syncing' })
+  try {
+    await syncTrip(tripId)
+    const t = store().trips.find((x) => x.id === tripId)
+    if (!t?.drive?.fileId) throw new Error(tr('Drive에 올리지 못했습니다'))
+    if (t.drive.view) return t.drive.view.fileId
+    const body = JSON.stringify(viewOf(t))
+    const res = await upload('POST', `${UPLOAD}/files`, { name: `${t.title || tr('여행')}.trj-view.json`, parents: [await ensureFolder()], appProperties: { trjViewOf: t.id } }, body)
+    const r = await api(`${API}/files/${res.id}/permissions?fields=id`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'anyone', role: 'reader' }) })
+    if (!r.ok) throw new Error(tr('보기 링크를 열지 못했습니다'))
+    store().patchDrive(tripId, { view: { fileId: res.id, sent: body } })
+    return res.id
+  } finally { setStatus({ kind: 'idle', lastSync: Date.now() }) }
+}
+
+/** 보기 링크를 끈다: 보기 파일을 지워서, 전에 보낸 링크도 더는 열리지 않는다 */
+export async function stopViewLink(tripId: string) {
+  const v = store().trips.find((x) => x.id === tripId)?.drive?.view
+  if (!v) return
+  await ensureToken()
+  const r = await api(`${API}/files/${v.fileId}`, { method: 'DELETE' })
+  if (!r.ok && r.status !== 404) throw new Error(tr('보기 링크를 끄지 못했습니다'))
+  store().patchDrive(tripId, { view: undefined })
+}
+
+/** 받는 사람: 로그인 없이 보기 파일을 받는다. 없거나 꺼졌으면 null */
+export async function fetchView(viewFileId: string): Promise<Trip | null> {
+  if (!API_KEY) throw new Error(tr('이 앱에는 Google API 키가 설정되어 있지 않습니다'))
+  const r = await fetch(`${API}/files/${encodeURIComponent(viewFileId)}?alt=media&key=${API_KEY}`, { cache: 'no-store' })
+  if (r.status === 404 || r.status === 403) return null
+  if (!r.ok) throw new Error(tr('일정을 받지 못했습니다. 잠시 뒤 다시 열어 보세요'))
+  const t = JSON.parse(await r.text()) as Trip
+  return t && Array.isArray(t.days) && t.title ? t : null
 }
 
 export interface Editor { id: string; role: string; email?: string; name?: string }

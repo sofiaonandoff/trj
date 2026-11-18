@@ -198,12 +198,12 @@ function PlaceRow({ p, n, next, only, onOpen, onToggle }: { p: Place; n: number;
   )
 }
 
-function Hop({ from, to }: { from?: LL; to?: LL }) {
+export function Hop({ from, to }: { from?: LL; to?: LL }) {
   return from && to ? <div className="hop">{travelLabel(km(from, to))} · {distLabel(km(from, to))}</div> : <div style={{ height: 10 }} />
 }
 
 /** 항공편: 그 날 시각에 맞춰 장소 사이에 들어가고, 공항이 동선의 한 지점이 된다 */
-function FlightRow({ e, next, only, onOpen }: { e: Extract<Entry, { kind: 'flight' }>; next?: LL; only: boolean; onOpen: () => void }) {
+export function FlightRow({ e, next, only, onOpen }: { e: Extract<Entry, { kind: 'flight' }>; next?: LL; only: boolean; onOpen: () => void }) {
   const f = e.flight
   const arriving = e.arriving
   const mins = flightMinutes(f)
@@ -238,7 +238,7 @@ function FlightRow({ e, next, only, onOpen }: { e: Extract<Entry, { kind: 'fligh
 }
 
 /** 숙소: 그 날 아침에 나서는 곳(위)과 밤에 돌아오는 곳(아래) */
-function StayRow({ e, date, next, only, onOpen }: { e: Extract<Entry, { kind: 'stay-start' | 'stay-end' }>; date: string; next?: LL; only: boolean; onOpen: () => void }) {
+export function StayRow({ e, date, next, only, onOpen }: { e: Extract<Entry, { kind: 'stay-start' | 'stay-end' }>; date: string; next?: LL; only: boolean; onOpen: () => void }) {
   const s = e.stay
   const start = e.kind === 'stay-start'
   const total = dateRange(s.checkIn, s.checkOut).length - 1

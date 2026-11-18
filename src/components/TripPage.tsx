@@ -1,9 +1,10 @@
 import { tr } from '../i18n'
 import { motion } from 'framer-motion'
-import { ArrowLeft, BookOpen, Download, Link2, ListChecks, MoreHorizontal, Route, Share2, UserPlus, Wallet } from 'lucide-react'
+import { ArrowLeft, BookOpen, Copy, Download, Eye, Link2, ListChecks, MoreHorizontal, Route, Send, Share2, UserPlus, Wallet } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { onAnnounced, takeAnnounced, type Invitee } from '../lib/invite'
-import { shareLink } from '../lib/share'
+import { shareLink, snapshotViewLink } from '../lib/share'
+import { driveConfigured, startViewLink, stopViewLink, viewLink } from '../lib/drive'
 import { diffDays, download, fmtRange, haptic, today } from '../lib/util'
 import { useStore } from '../store'
 import type { Trip } from '../types'
@@ -104,9 +105,10 @@ function ShareSheet({ trip, open, onClose, onJournal, onManage }: { trip: Trip; 
   return (
     <Sheet open={open} onClose={onClose} title={tr('공유와 내보내기')}>
       <div className="stack">
+        <ViewLink trip={trip} />
         <CoEdit trip={trip} />
         <div className="list">
-          <button onClick={send}><Link2 size={20} /><span className="grow"><b>{tr('복사본 링크 보내기')}</b><small>{tr('받은 사람은 따로 고치는 사본을 갖습니다 (로그인 없음)')}</small></span></button>
+          <button onClick={send}><Link2 size={20} /><span className="grow"><b>{tr('고칠 수 있는 사본 보내기')}</b><small>{tr('받은 사람은 따로 고치는 사본을 갖습니다 (로그인 없음)')}</small></span></button>
           <button onClick={() => { onClose(); onJournal() }}><BookOpen size={20} /><span className="grow"><b>{tr('이미지·블로그·유튜브용 내보내기')}</b><small>{tr('기록 탭에서 할 수 있습니다')}</small></span></button>
           <button onClick={() => { download(`${trip.title}.trj.json`, JSON.stringify(trip, null, 2), 'application/json'); toast(tr('파일로 저장했습니다')) }}><Download size={20} /><span className="grow"><b>{tr('파일로 저장')}</b><small>{tr('내 드라이브에 보관하고, 홈에서 다시 불러올 수 있습니다')}</small></span></button>
         </div>
@@ -115,3 +117,42 @@ function ShareSheet({ trip, open, onClose, onJournal, onManage }: { trip: Trip; 
     </Sheet>
   )
 }
+
+/** 로그인 없이 보는 링크. 받는 사람은 앱 설치·로그인 없이 일정·항공편·숙소를 본다 */
+function ViewLink({ trip }: { trip: Trip }) {
+  const [busy, setBusy] = useState(false)
+  const v = trip.drive?.view
+  const owner = trip.drive?.role !== 'editor'
+  const send = async (url: string) => {
+    const text = tr('{0} 일정이에요. 로그인 없이 볼 수 있어요', trip.title)
+    if (navigator.share) { try { await navigator.share({ title: trip.title, text, url }); return } catch { /* 닫으면 복사로 */ } }
+    copy(url, tr('보기 링크를 복사했습니다'))
+  }
+  const run = async (fn: () => Promise<unknown>) => { setBusy(true); try { await fn() } catch (e) { toast((e as Error).message) } finally { setBusy(false) } }
+  const make = () => run(async () => { const id = await startViewLink(trip.id); toast(tr('보기 링크를 만들었습니다')); await send(viewLink(id)) })
+  const stop = () => run(async () => { await stopViewLink(trip.id); toast(tr('보기 링크를 껐습니다. 전에 보낸 링크는 더 열리지 않습니다')) })
+  return (
+    <section className="coedit">
+      <h3><Eye size={18} />{tr('로그인 없이 일정 보여 주기')}</h3>
+      {v ? (
+        <>
+          <p className="hint" style={{ marginTop: 0 }}>{tr('보기 링크가 켜져 있습니다. 링크가 있는 사람은 로그인 없이 일정·항공편·숙소를 보고, 고친 내용도 1분 안팎으로 반영됩니다. 지출·준비물·이메일·예약번호는 보이지 않습니다.')}</p>
+          <div className="row">
+            <button className="btn btn-primary" disabled={busy} onClick={() => send(viewLink(v.fileId))}><Send size={16} />{tr('보기 링크 보내기')}</button>
+            <button className="btn btn-ghost" disabled={busy} onClick={() => copy(viewLink(v.fileId), tr('보기 링크를 복사했습니다'))} aria-label={tr('보기 링크 복사')}><Copy size={16} /></button>
+            {owner && <button className="btn btn-quiet" disabled={busy} onClick={stop}>{tr('끄기')}</button>}
+          </div>
+        </>
+      ) : driveConfigured && owner ? (
+        <>
+          <p className="hint" style={{ marginTop: 0 }}>{tr('받는 사람은 로그인 없이 일정·항공편·숙소를 보고, 내가 고치면 1분 안팎으로 반영됩니다. 지출·준비물·이메일·예약번호는 보이지 않습니다. 처음 한 번 내 Google 계정 연결이 필요합니다.')}</p>
+          <button className="btn btn-primary btn-block" disabled={busy} onClick={make}><Eye size={18} />{tr('보기 링크 만들기')}</button>
+        </>
+      ) : null}
+      <button className="btn btn-quiet btn-block" style={{ marginTop: 6 }} onClick={() => send(snapshotViewLink(trip))}>
+        <Link2 size={16} />{v || (driveConfigured && owner) ? tr('Google 없이 지금 일정 그대로 보내기') : tr('지금 일정 그대로 보내기')}
+      </button>
+    </section>
+  )
+}
+

@@ -28,6 +28,31 @@ export function parseTripFile(text: string): Trip | null {
   } catch { return null }
 }
 
+/**
+ * 로그인 없이 보는 링크에 담는 일정. 지출·준비물·기록·동행 이메일·예약번호·좌석은 빼고
+ * 날짜별 장소, 항공편, 숙소만 남긴다 (링크를 가진 누구나 볼 수 있으므로).
+ */
+export function viewOf(t: Trip): Trip {
+  return {
+    id: t.id, title: t.title, city: t.city, country: t.country, lat: t.lat, lng: t.lng, start: t.start, end: t.end,
+    legs: t.legs, currency: t.currency, rate: 0, budget: 0, createdAt: t.createdAt, updatedAt: t.updatedAt,
+    days: t.days.map((d) => ({ date: d.date, items: d.items.map(({ u: _u, cost: _c, done: _d, ...p }) => p) })),
+    flights: t.flights.map(({ u: _u, pnr: _p, seat: _s, ...f }) => f),
+    stays: (t.stays ?? []).map(({ u: _u, code: _c, ...st }) => st),
+    members: t.members.map((m) => ({ id: m.id, name: m.name, color: m.color })),
+    expenses: [], checklist: [], journal: {},
+  }
+}
+
+/** 로그인 없이 보는 링크 (지금 일정 그대로, 서버 없이 주소에 담는다) */
+export const snapshotViewLink = (t: Trip) => `${location.origin}${location.pathname}#/view/s/${LZString.compressToEncodedURIComponent(JSON.stringify(viewOf(t)))}`
+export function decodeView(data: string): Trip | null {
+  try {
+    const t = JSON.parse(LZString.decompressFromEncodedURIComponent(data) ?? '') as Trip
+    return t && Array.isArray(t.days) && t.title ? t : null
+  } catch { return null }
+}
+
 const flightLine = (t: Trip, date: string) => t.flights.filter((f) => f.depDate === date).map((f) =>
   `${f.depTime} ${airport(f.from)?.city ?? f.from} → ${f.arrTime} ${airport(f.to)?.city ?? f.to} (${airlineOf(f.flightNo)} ${f.flightNo}, ${fmtDur(flightMinutes(f))})`)
 

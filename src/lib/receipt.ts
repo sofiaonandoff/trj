@@ -354,23 +354,41 @@ export function flightFromTable(text: string, days: string[]): Flight | null {
   const isAirport = (c: string) => codes.has(c) && !NOT_AIRPORT.has(c)
 
   // 편명: "편명 TW502"처럼 항목이 있으면 그것, 없으면 아는 항공사 코드로 시작하는 낱말 (B787-10 같은 기종은 뺀다)
+  // 표의 머리글 줄(Flight Number)과 값 줄이 나뉜 화면, OCR이 소문자로 읽은 "Nz501"도 받는다
   let flightNo: string | undefined
   const labeled = text.match(/(?:편명|항공편|flight\s*(?:no\.?|number)?|便名)\s*[:：]?\s*([A-Z0-9]{2})\s?(\d{1,4})\b/i)
-  if (labeled) flightNo = `${labeled[1].toUpperCase()}${labeled[2]}`
+  if (labeled && AIRLINES[labeled[1].toUpperCase()]) flightNo = `${labeled[1].toUpperCase()}${labeled[2]}`
   else {
     for (const m of text.matchAll(/(?<![A-Z0-9-])([A-Z]{2}|[A-Z]\d|\d[A-Z])\s?(\d{2,4})(?![\d-])/g)) {
       if (AIRLINES[m[1]] && !/^[AB]\d{3}/.test(m[0])) { flightNo = `${m[1]}${m[2]}`; break }
     }
+    if (!flightNo) for (const m of text.matchAll(/(?<![A-Za-z0-9-])([A-Za-z]{2}|[A-Za-z]\d|\d[A-Za-z])\s?(\d{3,4})(?![\d:-])/g)) {
+      const c = m[1].toUpperCase()
+      if (AIRLINES[c] && !/^[AB]\d{3}/i.test(m[0])) { flightNo = `${c}${m[2]}`; break }
+    }
   }
   if (!flightNo) return null
 
-  // 구간: 아는 공항 코드 둘이 한 줄에 있으면 그 줄, 아니면 나온 순서대로 앞의 둘
+  // 구간: 아는 공항 코드 둘이 한 줄에 있으면 그 줄, 아니면 나온 순서대로 앞의 둘.
+  // 코드가 흐리게 찍혀 못 읽으면 "Auckland to Christchurch"처럼 도시 이름 구간으로 찾는다
   let from: string | undefined, to: string | undefined
   const allCodes: string[] = []
   for (const l of lines) {
     const iata = [...l.matchAll(/\b([A-Z]{3})\b/g)].map((m) => m[1]).filter(isAirport)
     if (!from && iata.length >= 2 && iata[0] !== iata[1]) [from, to] = iata
     for (const c of iata) if (!allCodes.includes(c)) allCodes.push(c)
+  }
+  if (!from) {
+    const byCity = (name: string) => { const n = name.trim().toLowerCase(); return n.length >= 3 ? AIRPORTS.find((a) => a.city.toLowerCase() === n)?.code : undefined }
+    for (const l of lines) {
+      const m = l.match(/^(.*?\S)\s+(?:to|→|->|–|—|-|✈)\s+(\S.*)$/i)
+      if (!m) continue
+      const left = m[1].split(/\s+/), right = m[2].split(/\s+/)
+      // "New York to San Francisco"처럼 여러 낱말 도시도 받는다: 왼쪽은 끝에서, 오른쪽은 앞에서 1~3낱말
+      const pick = (words: string[], end: boolean) => [3, 2, 1].map((n) => byCity((end ? words.slice(-n) : words.slice(0, n)).join(' '))).find(Boolean)
+      const x = pick(left, true), y = pick(right, false)
+      if (x && y && x !== y) { [from, to] = [x, y]; break }
+    }
   }
   if (!from && allCodes.length >= 2) [from, to] = allCodes
   if (!from || !to) return null
@@ -379,14 +397,24 @@ export function flightFromTable(text: string, days: string[]): Flight | null {
   const depLine = lines.find((l) => /출발\s*일|departure\s*date|출국|가는\s*날|出発日/i.test(l)) ?? ''
   const depDate = findDates(depLine, year)[0] ?? findDates(text, year)[0] ?? pickTripDate(text, days)
 
-  // 시각: "12:15~21:15", 출발/도착 시간 항목, 또는 공항 코드와 같은 줄의 시각
-  const hhmm = (l: string) => { const m = l.match(/(?<![\d:])([01]?\d|2[0-3])\s*:\s*([0-5]\d)(?![\d:])/); return m ? `${m[1].padStart(2, '0')}:${m[2]}` : undefined }
-  const range = text.match(/(?<!\d)([01]?\d|2[0-3]):([0-5]\d)\s*[~\-–—]\s*([01]?\d|2[0-3]):([0-5]\d)(\s*\(?\+1\)?)?/)
+  // 시각: "12:15~21:15", "1:05pm → 2:30pm", 출발/도착 시간 항목, 또는 공항 코드와 같은 줄의 시각.
+  // 체크인·탑승 마감 시각은 항공편 시각이 아니므로 뺀다
+  const T = '(?<![\\d:])([01]?\\d|2[0-3])\\s*:\\s*([0-5]\\d)(?![\\d:])\\s*([AaPp]\\.?\\s?[Mm]\\.?)?'
+  const to24 = (h: string, mm: string, ap?: string) => {
+    let n = Number(h); const p = ap?.[0]?.toLowerCase()
+    if (p === 'p' && n < 12) n += 12
+    if (p === 'a' && n === 12) n = 0
+    return `${String(n).padStart(2, '0')}:${mm}`
+  }
+  const hhmm = (l: string) => { const m = l.match(new RegExp(T)); return m ? to24(m[1], m[2], m[3]) : undefined }
+  const NOT_FLIGHT_TIME = /close|마감|check[\s-]*in|boarding|탑승|gate|게이트|체크인/i
+  const timeLines = lines.filter((l) => !NOT_FLIGHT_TIME.test(l))
+  const range = timeLines.map((l) => l.match(new RegExp(`${T}\\s*(?:[~\\-–—>→]|to)\\s*${T}(\\s*\\(?\\+1\\)?)?`))).find(Boolean)
   const labeledTime = (re: RegExp) => { const l = lines.find((x) => re.test(x)); return l ? hhmm(l.replace(re, ' ')) : undefined }
-  const besideCode = (code: string) => { const l = lines.find((x) => new RegExp(`\\b${code}\\b`).test(x) && hhmm(x)); return l ? hhmm(l) : undefined }
-  const times = lines.map(hhmm).filter((t): t is string => Boolean(t))
-  const depTime = range ? `${range[1].padStart(2, '0')}:${range[2]}` : labeledTime(/출발\s*시간|departure\s*time|出発時刻/i) ?? besideCode(from) ?? times[0]
-  const arrTime = range ? `${range[3].padStart(2, '0')}:${range[4]}` : labeledTime(/도착\s*시간|arrival\s*time|到着時刻/i) ?? besideCode(to) ?? times.find((t) => t !== depTime)
+  const besideCode = (code: string) => { const l = timeLines.find((x) => new RegExp(`\\b${code}\\b`).test(x) && hhmm(x)); return l ? hhmm(l) : undefined }
+  const times = timeLines.map(hhmm).filter((t): t is string => Boolean(t))
+  const depTime = range ? to24(range[1], range[2], range[3]) : labeledTime(/출발\s*시간|departure\s*time|出発時刻/i) ?? besideCode(from) ?? times[0]
+  const arrTime = range ? to24(range[4], range[5], range[6]) : labeledTime(/도착\s*시간|arrival\s*time|到着時刻/i) ?? besideCode(to) ?? times.find((t) => t !== depTime)
   if (!depDate || !depTime || !arrTime) return null
 
   // 도착일: +1일 표시가 있거나, 도착 시각이 출발보다 이르면 다음 날
@@ -451,8 +479,9 @@ export function readText(all: OcrLine[], days: string[], tripCurrency: string): 
   const maxTop = Math.max(1, ...lines.map((l) => l.top))
   const statusBar = (l: OcrLine) => l.top <= maxTop * 0.04 && /^\s*\d{1,2}\s*[:.]?\s*\d{2}/.test(l.text) && !/[~\-–—]\s*\d{1,2}:\d{2}/.test(l.text)
   const body = lines.filter((l) => !CHROME.test(l.text) && !statusBar(l))
-  // 숙소 화면에는 이름·예약번호 같은 숫자가 많아, 합계·결제 항목이 붙은 금액만 믿는다
-  const amount = findTotal(body.map((l) => l.text).filter((t) => kind?.cat !== 'stay' || (TOTAL.test(t) && !NOT_TOTAL.test(t))))
+  // 숙소·항공권 화면에는 이름·예약번호·비행시간 같은 숫자가 많아, 합계·결제·운임 항목이 붙은 금액만 믿는다
+  const labelledOnly = kind?.cat === 'stay' || flights.length > 0
+  const amount = findTotal(body.map((l) => l.text).filter((t) => !labelledOnly || ((TOTAL.test(t) || (flights.length > 0 && /운임|요금|항공료|fare|price/i.test(t))) && !NOT_TOTAL.test(t))))
   const name = findName(body)
   // 통화 기호를 못 읽었을 때: 한글 위주면 원화, 가나가 있으면 엔화로 본다
   const hangul = (text.match(/\p{Script=Hangul}/gu) ?? []).length

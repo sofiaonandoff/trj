@@ -82,6 +82,7 @@ const AIRLINES_KO: Record<string, string> = {
   TK: '터키항공', EK: '에미레이트항공', QR: '카타르항공', DL: '델타항공', UA: '유나이티드항공',
   AA: '아메리칸항공', HA: '하와이안항공', AC: '에어캐나다', QF: '콴타스항공', PR: '필리핀항공',
   '5J': '세부퍼시픽', MU: '중국동방항공', CA: '중국국제항공', CZ: '중국남방항공',
+  NZ: '에어뉴질랜드', JQ: '젯스타', VA: '버진오스트레일리아', AK: '에어아시아', D7: '에어아시아 X', FD: '타이에어아시아', MH: '말레이시아항공', GA: '가루다인도네시아', EY: '에티하드항공', AY: '핀에어', LX: '스위스항공', AZ: 'ITA항공', IB: '이베리아항공', OS: '오스트리아항공', HX: '홍콩항공', UO: '홍콩익스프레스', GK: '젯스타재팬', TR: '스쿠트', '3K': '젯스타아시아', WN: '사우스웨스트항공', AS: '알래스카항공', B6: '제트블루', FJ: '피지항공', NX: '마카오항공', BI: '로열브루나이항공', SU: '아에로플로트', ET: '에티오피아항공', MS: '이집트항공',
 }
 export const AIRLINES: Record<string, string> = Object.fromEntries(Object.entries(AIRLINES_KO).map(([code, name]) => [code, tr(name)]))
 export const airlineOf = (flightNo: string) => AIRLINES[flightNo.slice(0, 2).toUpperCase()] ?? ''

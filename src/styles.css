@@ -517,3 +517,12 @@ button { cursor: pointer; border: 0; background: none; padding: 0; }
 .invite-row small { display: block; font-size: 12.5px; color: var(--mute); overflow-wrap: anywhere; }
 .invite-row a.btn { text-decoration: none; }
 .invite-row .btn { height: 40px; padding: 0 12px; flex: none; }
+
+/* ── 로그인 없이 보는 일정 ── */
+.view-brand { display: flex; align-items: center; justify-content: space-between; padding: 4px 20px 10px; }
+.view-head { padding-top: calc(14px + env(safe-area-inset-top)); }
+.view-title { font-size: 22px; line-height: 1.25; margin: 0 0 2px; }
+.view-note { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12.5px; opacity: .8; margin: 8px 0 0; padding: 0 20px; }
+.view-refresh { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; font: inherit; color: inherit; background: none; border: 0; padding: 4px 0; cursor: pointer; }
+.view-foot { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; padding: 20px 16px calc(28px + env(safe-area-inset-bottom)); }
+.map-hint { display: inline-flex; align-items: center; gap: 2px; opacity: .7; }

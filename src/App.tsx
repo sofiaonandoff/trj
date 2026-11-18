@@ -1,4 +1,5 @@
 import { tr } from './i18n'
+import ViewPage from './components/ViewPage'
 import { useEffect } from 'react'
 import { JoinPage } from './components/DriveUI'
 import Home from './components/Home'
@@ -28,6 +29,7 @@ export default function App() {
   else if (route.startsWith('/trip/')) page = <TripPage key={route} id={route.slice('/trip/'.length)} />
   else if (route.startsWith('/join/')) page = <JoinPage fileId={route.slice('/join/'.length)} />
   else if (route.startsWith('/import/')) page = <div className="shell" />
+  else if (route.startsWith('/view/')) page = <ViewPage key={route} source={route.slice('/view/'.length)} />
 
   return <>{page}<Toast /></>
 }

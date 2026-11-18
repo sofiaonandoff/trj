@@ -45,7 +45,7 @@
     <h2>2. Google 계정 데이터 사용</h2>
     <ul>
       <li>앱은 <code>drive.file</code> 권한만 요청합니다. 이 권한으로는 앱이 만든 파일과 사용자가 직접 선택한 파일에만 접근할 수 있고, Drive의 다른 파일은 볼 수 없습니다.</li>
-      <li>함께 편집을 쓰면, 사용자가 입력한 동행의 이메일 주소로 Google이 Drive 공유 초대를 보냅니다. 편집자 목록(이름·이메일)은 공유 상태를 보여 주는 데에만 사용합니다.</li>
+      <li>함께 편집을 쓰면, 사용자가 입력한 동행의 Google 계정에 Drive 편집 권한을 줍니다 (초대장은 사용자가 직접 보냅니다). 편집자 목록(이름·이메일)은 공유 상태를 보여 주는 데에만 사용합니다.</li>
       <li>Google 로그인 정보(액세스 토큰)는 브라우저 메모리에만 두고 저장하거나 전송하지 않습니다.</li>
       <li>앱이 Google API로부터 받은 정보의 사용과 이전은 제한적 사용(Limited Use) 요구사항을 포함한 <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API 서비스 사용자 데이터 정책</a>을 따릅니다. 받은 정보는 광고에 사용하거나 판매하지 않으며, AI 모델 학습에 사용하지 않습니다.</li>
     </ul>
@@ -61,7 +61,7 @@
     </ul>
 
     <h2>4. 공유</h2>
-    <p>'복사본 링크'를 보내면 여행 내용(사진 제외)이 링크 주소 안에 담깁니다. 링크를 받은 사람은 그 내용을 볼 수 있으니 공유할 상대를 확인하세요.</p>
+    <p>'고칠 수 있는 사본'과 '지금 일정 그대로 보내기' 링크는 여행 내용(사진 제외)을 링크 주소 안에 담습니다. '보기 링크'를 만들면 날짜별 장소·항공편·숙소만 담은 보기 파일(지출·준비물·이메일·예약번호 제외)을 사용자의 Drive <code>TRJ</code> 폴더에 만들고 '링크가 있는 사람은 보기 가능'으로 엽니다. 보기 링크를 끄면 그 파일을 지웁니다. 어느 링크든 받은 사람은 그 내용을 볼 수 있으니 공유할 상대를 확인하세요.</p>
 
     <h2>5. 삭제</h2>
     <ul>
@@ -88,7 +88,7 @@
     <h2>2. Use of Google user data</h2>
     <ul>
       <li>The app requests only the <code>drive.file</code> scope. It can access only files the app created or files you choose, and cannot see the rest of your Drive.</li>
-      <li>When you edit together, Google sends a Drive sharing invitation to the companion email addresses you enter. The list of editors (names and emails) is used only to show who the trip is shared with.</li>
+      <li>When you edit together, the companion Google accounts you enter get editing access in Drive (you send the invite yourself). The list of editors (names and emails) is used only to show who the trip is shared with.</li>
       <li>Your Google access token stays in browser memory and is never stored or transmitted elsewhere.</li>
       <li>The app's use and transfer of information received from Google APIs adheres to the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including the Limited Use requirements. This information is not used for advertising, not sold, and not used to train AI models.</li>
     </ul>
@@ -104,7 +104,7 @@
     </ul>
 
     <h2>4. Sharing</h2>
-    <p>A "copy link" carries the trip contents (without photos) inside the link itself. Anyone with the link can see them, so check who you send it to.</p>
+    <p>"Editable copy" and "send the plan as it is now" links carry the trip contents (without photos) inside the link itself. A "view link" creates a view file with only the daily places, flights and stays (no expenses, checklist, emails or booking numbers) in the <code>TRJ</code> folder of your Drive and sets it to "anyone with the link can view"; turning the view link off deletes that file. Anyone with any of these links can see their contents, so check who you send them to.</p>
 
     <h2>5. Deletion</h2>
     <ul>
