@@ -1,5 +1,6 @@
 import { dayLine, nextStops, routeSegments } from '../src/lib/dayline'
 import { mergeTrips, stamp } from '../src/lib/merge'
+import { fitAfterArrival } from '../src/lib/planner'
 import type { Trip } from '../src/types'
 
 let fail = 0
@@ -39,6 +40,19 @@ check('도착 날 경로: 방콕 공항 → 숙소 (인천 쪽은 비행 구간�
 const far = { ...trip, days: [{ date: '2026-12-02', items: [P('x', '15:00')] }, ...trip.days.slice(1)] } as Trip
 const fl = dayLine(far, '2026-12-02')
 check('먼 공항까지는 거리·선 없음', nextStops(fl)[0] === undefined && routeSegments(fl).every((sg) => sg.length < 3), [nextStops(fl)[0], routeSegments(fl)])
+// 항공편 도착 전 시각에 잡힌 도착 도시 장소는 도착 뒤로 (도착 14:00 → 입국 90분 + 공항에서 이동)
+const BKK = { lat: 13.69, lng: 100.75 }
+const fit = structuredClone({ ...trip, days: [{ date: '2026-12-02', items: [P('s1', '10:00'), P('s2', '12:00'), P('s3', '18:00')] }, ...trip.days.slice(1)] }) as Trip
+const r1 = fitAfterArrival(fit, { to: 'BKK', arrDate: '2026-12-02', arrTime: '14:00' }, BKK)
+const t1 = fit.days[0].items.map((p) => `${p.id}@${p.time}`)
+check('도착 전 장소 2곳을 도착 뒤로, 원래 저녁 일정은 겹치지 않게 그 뒤로', r1.moved === 2 && t1.map((x) => x.split('@')[0]).join() === 's1,s2,s3' && t1[0] >= 's1@15:30' && fit.days[0].items.every((p, i, a) => !i || p.time! > a[i - 1].time!), [r1, t1])
+// 밤늦게 도착하면 다음 날로
+const late = structuredClone({ ...trip, days: [{ date: '2026-12-02', items: [P('l1', '15:00'), P('l2', '17:20')] }, { date: '2026-12-03', items: [P('m1', '09:30')] }, ...trip.days.slice(2)] }) as Trip
+const r2 = fitAfterArrival(late, { to: 'BKK', arrDate: '2026-12-02', arrTime: '22:10' }, BKK)
+check('밤 도착이면 다음 날 앞으로', r2.nextDay === 2 && late.days[0].items.length === 0 && late.days[1].items.map((p) => p.id).join() === 'l1,l2,m1' && late.days[1].items[0].time === '09:30', [r2, late.days[1].items])
+// 다른 도시(출발지)의 장소는 그대로
+const home = structuredClone({ ...trip, days: [{ date: '2026-12-02', items: [{ ...P('seoul', '09:00'), lat: 37.5, lng: 127 }] }, ...trip.days.slice(1)] }) as Trip
+check('출발 도시 장소는 옮기지 않는다', fitAfterArrival(home, { to: 'BKK', arrDate: '2026-12-02', arrTime: '14:00' }, BKK).moved === 0)
 // 함께 편집: 한쪽에서 넣은 숙소와 다른 쪽에서 지운 숙소가 합쳐진다
 const base = structuredClone({ ...trip, id: 't', members: [], expenses: [], checklist: [], journal: {}, deleted: {} }) as Trip
 const a = structuredClone(base), b = structuredClone(base)

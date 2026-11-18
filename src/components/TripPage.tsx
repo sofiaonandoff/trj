@@ -1,17 +1,17 @@
 import { tr } from '../i18n'
 import { motion } from 'framer-motion'
-import { ArrowLeft, BookOpen, Download, Link2, ListChecks, Route, Share2, Trash2, Wallet } from 'lucide-react'
+import { ArrowLeft, BookOpen, Download, Link2, ListChecks, MoreHorizontal, Route, Share2, Wallet } from 'lucide-react'
 import { useState } from 'react'
 import { shareLink } from '../lib/share'
 import { diffDays, download, fmtRange, haptic, today } from '../lib/util'
-import { fitLegs } from '../lib/legs'
-import { syncDays, useStore } from '../store'
+import { useStore } from '../store'
 import type { Trip } from '../types'
 import BudgetTab from './BudgetTab'
 import { CoEdit, DriveChip } from './DriveUI'
 import JournalTab from './JournalTab'
 import PlanTab from './PlanTab'
 import PrepTab from './PrepTab'
+import TripSettings from './TripSettings'
 import { Avatars, RouteArt, Sheet, copy, go, toast } from './ui'
 
 const TABS = [
@@ -27,6 +27,7 @@ export default function TripPage({ id }: { id: string }) {
   const mutate = useStore((s) => s.mutate)
   const [tab, setTab] = useState<TabId>('plan')
   const [sharing, setSharing] = useState(false)
+  const [managing, setManaging] = useState(false)
 
   if (!trip) {
     return (
@@ -47,6 +48,7 @@ export default function TripPage({ id }: { id: string }) {
           <button className="icon-btn" aria-label={tr('내 여행으로')} onClick={() => go('/')}><ArrowLeft size={22} /></button>
           <input className="title-input" aria-label={tr('여행 이름')} value={trip.title} onChange={(e) => mutate(trip.id, (t) => { t.title = e.target.value })} />
           <button className="icon-btn" aria-label={tr('공유와 내보내기')} onClick={() => setSharing(true)}><Share2 size={20} /></button>
+          <button className="icon-btn" aria-label={tr('여행 관리')} onClick={() => setManaging(true)}><MoreHorizontal size={22} /></button>
         </div>
         <div className="meta">
           <p><span className="num">{badge}</span>{fmtRange(trip.start, trip.end)}</p>
@@ -72,15 +74,13 @@ export default function TripPage({ id }: { id: string }) {
         ))}
       </nav>
 
-      <ShareSheet trip={trip} open={sharing} onClose={() => setSharing(false)} onJournal={() => { setTab('journal'); scrollTo(0, 0) }} />
+      <TripSettings trip={trip} open={managing} onClose={() => setManaging(false)} />
+      <ShareSheet trip={trip} open={sharing} onClose={() => setSharing(false)} onJournal={() => { setTab('journal'); scrollTo(0, 0) }} onManage={() => setManaging(true)} />
     </div>
   )
 }
 
-function ShareSheet({ trip, open, onClose, onJournal }: { trip: Trip; open: boolean; onClose: () => void; onJournal: () => void }) {
-  const mutate = useStore((s) => s.mutate)
-  const remove = useStore((s) => s.remove)
-  const [confirm, setConfirm] = useState(false)
+function ShareSheet({ trip, open, onClose, onJournal, onManage }: { trip: Trip; open: boolean; onClose: () => void; onJournal: () => void; onManage: () => void }) {
 
   const send = async () => {
     const url = shareLink(trip)
@@ -89,13 +89,8 @@ function ShareSheet({ trip, open, onClose, onJournal }: { trip: Trip; open: bool
     }
     copy(url, tr('링크를 복사했습니다. 받은 사람이 열면 여행이 그대로 담깁니다'))
   }
-  const setDates = (start: string, end: string) => {
-    if (end < start) return toast(tr('돌아오는 날이 떠나는 날보다 빠릅니다'))
-    mutate(trip.id, (t) => { const prev = t.start; t.start = start; t.end = end; syncDays(t); fitLegs(t, prev) })
-  }
-
   return (
-    <Sheet open={open} onClose={() => { setConfirm(false); onClose() }} title={tr('공유와 내보내기')}>
+    <Sheet open={open} onClose={onClose} title={tr('공유와 내보내기')}>
       <div className="stack">
         <CoEdit trip={trip} />
         <div className="list">
@@ -103,20 +98,7 @@ function ShareSheet({ trip, open, onClose, onJournal }: { trip: Trip; open: bool
           <button onClick={() => { onClose(); onJournal() }}><BookOpen size={20} /><span className="grow"><b>{tr('이미지·블로그·유튜브용 내보내기')}</b><small>{tr('기록 탭에서 할 수 있습니다')}</small></span></button>
           <button onClick={() => { download(`${trip.title}.trj.json`, JSON.stringify(trip, null, 2), 'application/json'); toast(tr('파일로 저장했습니다')) }}><Download size={20} /><span className="grow"><b>{tr('파일로 저장')}</b><small>{tr('내 드라이브에 보관하고, 홈에서 다시 불러올 수 있습니다')}</small></span></button>
         </div>
-        <div className="row">
-          <label className="field"><span>{tr('떠나는 날')}</span><input type="date" value={trip.start} onChange={(e) => setDates(e.target.value, e.target.value > trip.end ? e.target.value : trip.end)} /></label>
-          <label className="field"><span>{tr('돌아오는 날')}</span><input type="date" value={trip.end} min={trip.start} onChange={(e) => setDates(trip.start, e.target.value)} /></label>
-        </div>
-        <p className="hint" style={{ marginTop: -6 }}>{tr('기간을 줄이면 빠지는 날의 일정은 마지막 날로 옮겨집니다.')}</p>
-        {confirm ? (
-          <div className="row">
-            <button className="btn btn-ghost" onClick={() => setConfirm(false)}>{tr('취소')}</button>
-            <button className="btn" style={{ background: 'var(--warn)', color: '#fff' }} onClick={() => { remove(trip.id); toast(tr('여행을 삭제했습니다')); go('/', true) }}>{tr('여행 삭제')}</button>
-          </div>
-        ) : (
-          <button className="btn btn-ghost" style={{ color: 'var(--warn)' }} onClick={() => setConfirm(true)}><Trash2 size={18} />{tr('여행 삭제')}</button>
-        )}
-        {confirm && <p className="hint" style={{ marginTop: -6 }}>{trip.drive?.fileId ? tr('이 기기에서만 지웁니다. Google Drive의 TRJ 폴더에 있는 파일은 남아 있어 홈에서 다시 불러올 수 있습니다.') : tr('삭제하면 이 기기에서 되돌릴 수 없습니다. 남겨 두려면 먼저 파일로 저장하세요.')}</p>}
+        <button className="btn btn-quiet" onClick={() => { onClose(); onManage() }}><MoreHorizontal size={16} />{tr('기간 바꾸기·여행 삭제는 여행 관리에서')}</button>
       </div>
     </Sheet>
   )

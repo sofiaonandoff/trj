@@ -334,6 +334,23 @@ export async function listEditors(fileId: string): Promise<Editor[]> {
 }
 
 /** 이메일로 편집자를 초대한다. Google이 초대 메일을 보내고, 메일에 TRJ 링크가 들어간다 */
+/**
+ * 내가 만든 여행 파일과 그 여행의 사진을 Drive 휴지통으로 옮긴다 (Drive에서 30일 안에 되살릴 수 있다).
+ * 다른 사람이 만든 함께 편집 여행은 건드리지 않는다. 파일을 옮겼으면 true.
+ */
+export async function trashTrip(t: Trip): Promise<boolean> {
+  const id = t.drive?.fileId
+  if (!id || t.drive?.role === 'editor') return false
+  await ensureToken()
+  const trash = (fileId: string) => api(`${API}/files/${fileId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trashed: true }) })
+  const r = await trash(id)
+  if (!r.ok && r.status !== 404) throw new Error(tr('Drive 파일을 지우지 못했습니다'))
+  // 사진은 여행마다 따로 올린 파일이라 함께 옮긴다 (실패해도 여행 삭제는 계속한다)
+  const photos = Object.values(t.journal).flatMap((j) => j.photos).filter((k) => k.startsWith('drive:')).map((k) => k.slice(6))
+  await Promise.allSettled(photos.map(trash))
+  return true
+}
+
 export async function inviteByEmail(fileId: string, email: string, message: string) {
   const params = new URLSearchParams({ sendNotificationEmail: 'true', emailMessage: message, fields: 'id' })
   const r = await api(`${API}/files/${fileId}/permissions?${params}`, {

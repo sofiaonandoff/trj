@@ -478,11 +478,17 @@ function FlightSheet({ trip, flight, onClose }: { trip: Trip; flight?: Flight | 
   }
 
   const save = () => {
-    mutate(trip.id, (t) => ready.forEach((f) => putFlight(t, { ...f, id: f.id ?? uid(), flightNo: f.flightNo.toUpperCase().replace(/\s/g, ''), from: f.from.toUpperCase(), to: f.to.toUpperCase() })))
+    let moved = 0, nextDay = 0
+    mutate(trip.id, (t) => ready.forEach((f) => {
+      const r = putFlight(t, { ...f, id: f.id ?? uid(), flightNo: f.flightNo.toUpperCase().replace(/\s/g, ''), from: f.from.toUpperCase(), to: f.to.toUpperCase() })
+      moved += r.moved; nextDay += r.nextDay
+    }))
     haptic(12)
     const first = ready.reduce((a, f) => (f.depDate < a ? f.depDate : a), trip.start), last = ready.reduce((a, f) => (f.arrDate > a ? f.arrDate : a), trip.end)
-    toast(first < trip.start || last > trip.end ? tr('항공편에 맞춰 여행 기간을 {0}–{1}로 넓혔습니다', md(first), md(last))
-      : ready.length > 1 ? tr('항공편 {0}개를 일정에 기록했습니다', ready.length) : tr('{0} 일정에 항공편을 기록했습니다', md(ready[0].depDate)))
+    const msg = first < trip.start || last > trip.end ? tr('항공편에 맞춰 여행 기간을 {0}–{1}로 넓혔습니다', md(first), md(last))
+      : ready.length > 1 ? tr('항공편 {0}개를 일정에 기록했습니다', ready.length) : tr('{0} 일정에 항공편을 기록했습니다', md(ready[0].depDate))
+    // 도착 전 시각에 잡혀 있던 장소를 옮겼으면 함께 알린다
+    toast(moved ? `${msg}. ${nextDay ? tr('도착 전 일정 {0}곳을 도착 뒤로 옮기고, 늦은 {1}곳은 다음 날로 넘겼습니다', moved, nextDay) : tr('도착 전 일정 {0}곳을 도착 뒤로 옮겼습니다', moved)}` : msg)
     onClose()
   }
   const remove = () => {

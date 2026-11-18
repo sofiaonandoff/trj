@@ -183,3 +183,61 @@ export function shortest(items: Place[]): Place[] {
   }
   return out
 }
+
+/** 내려서 입국 심사·짐 찾기까지 (분) */
+export const ARRIVAL_BUFFER = 90
+/** 이보다 늦게 시작하는 일정은 다음 날로 넘긴다 */
+const LATEST = 23 * 60
+
+/**
+ * 항공편이 도착하기 전 시각에 잡혀 있는, 도착 도시(도착 공항 300km 안)의 장소를 도착 뒤로 옮긴다.
+ * 도착 시각 + 입국 90분 + 공항에서 첫 장소까지 이동 시간부터 순서대로 다시 시각을 매기고,
+ * 뒤에 있던 장소도 겹치면 함께 밀린다. 밤 11시를 넘기는 장소는 다음 날 앞으로 옮긴다.
+ * 옮긴 장소 수와 다음 날로 넘긴 수를 돌려준다.
+ */
+export function fitAfterArrival(t: Trip, f: { to: string; arrDate: string; arrTime: string }, at: { lat: number; lng: number } | undefined): { moved: number; nextDay: number } {
+  const res = { moved: 0, nextDay: 0 }
+  const di = t.days.findIndex((d) => d.date === f.arrDate)
+  if (di < 0 || !at) return res
+  const day = t.days[di]
+  const ready = toMinute(f.arrTime) + ARRIVAL_BUFFER
+  const near = (p: Place) => km(at, p) <= 300
+  const early = day.items.filter((p) => p.time && near(p) && toMinute(p.time) < ready)
+  if (!early.length) return res
+  res.moved = early.length
+
+  // 도착 전에 할 수 있는 일(다른 도시에서 떠나기 전 일정)은 그대로 두고, 그 뒤에 옮긴 장소, 그다음에 원래 뒤에 있던 장소
+  const set = new Set(early)
+  const before = day.items.filter((p) => !set.has(p) && p.time && toMinute(p.time) < ready)
+  const after = day.items.filter((p) => !set.has(p) && !before.includes(p))
+  const chain = [...early, ...after]
+  let cursor = ready + travelMin(km(at, chain[0]))
+  const keep: Place[] = [], overflow: Place[] = []
+  chain.forEach((p, i) => {
+    const own = p.time && after.includes(p) ? toMinute(p.time) : 0
+    cursor = Math.max(cursor, own)
+    if (cursor > LATEST || overflow.length) { overflow.push(p); return }
+    p.time = fromMin(Math.ceil(cursor / 10) * 10)
+    keep.push(p)
+    cursor += (p.duration ?? 60) + (chain[i + 1] ? travelMin(km(p, chain[i + 1])) : 0)
+  })
+  day.items = [...before, ...keep]
+
+  // 너무 늦은 장소는 다음 날 맨 앞으로 (그 날 시각을 다시 맞춘다)
+  const next = t.days[di + 1]
+  if (overflow.length && next) {
+    for (const p of overflow) p.time = undefined
+    const startAt = next.items.find((p) => p.time)?.time
+    next.items = [...overflow, ...next.items]
+    if (startAt) next.items[0].time = startAt
+    retime(next.items)
+    res.nextDay = overflow.length
+  } else if (overflow.length) {
+    // 다음 날이 없으면 늦게라도 그 날에 남긴다
+    for (const p of overflow) { p.time = fromMin(Math.min(23 * 60 + 50, Math.ceil(cursor / 10) * 10)); cursor += p.duration ?? 60 }
+    day.items.push(...overflow)
+  }
+  return res
+}
+
+const toMinute = (hhmm: string) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5))

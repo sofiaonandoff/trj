@@ -1,10 +1,11 @@
 import { tr } from '../i18n'
-import { FolderDown, Plus } from 'lucide-react'
+import { FolderDown, MoreHorizontal, Plus } from 'lucide-react'
 import { useState } from 'react'
 import { diffDays, fmtRange, haptic, today } from '../lib/util'
 import { sampleTrip, useStore } from '../store'
 import type { Trip } from '../types'
 import { DriveChip, ImportSheet } from './DriveUI'
+import TripSettings from './TripSettings'
 import { legOf } from '../lib/legs'
 import { Avatars, LangButton, Logo, RouteArt, go } from './ui'
 
@@ -20,6 +21,8 @@ export default function Home() {
   const trips = useStore((s) => s.trips)
   const add = useStore((s) => s.add)
   const [importing, setImporting] = useState(false)
+  /** 관리(기간·삭제) 시트를 연 여행 */
+  const [managing, setManaging] = useState<Trip>()
   const now = today()
   const upcoming = trips.filter((t) => t.end >= now).sort((a, b) => a.start.localeCompare(b.start))
   const past = trips.filter((t) => t.end < now).sort((a, b) => b.start.localeCompare(a.start))
@@ -41,6 +44,7 @@ export default function Home() {
 
       <main className="home-body">
         {next ? (
+          <div className="hero-wrap">
           <button className="hero" onClick={() => go(`/trip/${next.id}`)}>
             <div className="hero-art">
               <RouteArt trip={next} animate />
@@ -54,6 +58,8 @@ export default function Home() {
               <Avatars members={next.members} />
             </div>
           </button>
+          <button className="icon-btn more-btn on-dark" aria-label={tr('{0} 관리', next.title)} onClick={() => setManaging(next)}><MoreHorizontal size={20} /></button>
+          </div>
         ) : (
           <div className="hero">
             <div className="empty">
@@ -67,28 +73,32 @@ export default function Home() {
         )}
 
         {rest.length > 0 && <h2 className="sec-title">{tr('그다음 여행')}</h2>}
-        {rest.map((t) => <Row key={t.id} t={t} />)}
+        {rest.map((t) => <Row key={t.id} t={t} onManage={() => setManaging(t)} />)}
         {past.length > 0 && <h2 className="sec-title">{tr('지난 여행')}</h2>}
-        {past.map((t) => <Row key={t.id} t={t} />)}
+        {past.map((t) => <Row key={t.id} t={t} onManage={() => setManaging(t)} />)}
         <a className="foot-link" href="/privacy.html">{tr('개인정보처리방침')}</a>
         <p className="foot-link" style={{ opacity: 0.6 }}>{tr('버전 {0}', __APP_VERSION__)}</p>
       </main>
 
       <button className="btn btn-primary fab" onClick={() => go('/new')}><Plus size={20} />{tr('새 여행 만들기')}</button>
       <ImportSheet open={importing} onClose={() => setImporting(false)} />
+      {managing && <TripSettings trip={trips.find((x) => x.id === managing.id) ?? managing} open={Boolean(managing)} onClose={() => setManaging(undefined)} />}
     </div>
   )
 }
 
-function Row({ t }: { t: Trip }) {
+function Row({ t, onManage }: { t: Trip; onManage: () => void }) {
   return (
-    <button className="trip-row" onClick={() => go(`/trip/${t.id}`)}>
-      <span className="thumb"><RouteArt trip={t} dots={false} /></span>
-      <span>
-        <h3>{t.title}</h3>
-        <p>{fmtRange(t.start, t.end)}</p>
-      </span>
-      <span className="when">{when(t).big}</span>
-    </button>
+    <div className="trip-row-wrap">
+      <button className="trip-row" onClick={() => go(`/trip/${t.id}`)}>
+        <span className="thumb"><RouteArt trip={t} dots={false} /></span>
+        <span>
+          <h3>{t.title}</h3>
+          <p>{fmtRange(t.start, t.end)}</p>
+        </span>
+        <span className="when">{when(t).big}</span>
+      </button>
+      <button className="icon-btn more-btn" aria-label={tr('{0} 관리', t.title)} onClick={onManage}><MoreHorizontal size={20} /></button>
+    </div>
   )
 }

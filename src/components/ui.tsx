@@ -33,7 +33,8 @@ export function toast(msg: string) {
   toastMsg = msg
   toastSubs.forEach((l) => l())
   clearTimeout(toastTimer)
-  toastTimer = window.setTimeout(() => { toastMsg = ''; toastSubs.forEach((l) => l()) }, 2200)
+  // 긴 안내는 읽을 시간을 더 준다
+  toastTimer = window.setTimeout(() => { toastMsg = ''; toastSubs.forEach((l) => l()) }, Math.min(6000, 2200 + msg.length * 45))
 }
 export function Toast() {
   const msg = useSyncExternalStore((l) => { toastSubs.add(l); return () => toastSubs.delete(l) }, () => toastMsg)

@@ -134,7 +134,7 @@ export interface Applied {
 }
 
 /** 넣을 거리를 여행에 넣는다 (mutate 안에서 부른다). 같은 영수증을 두 번 올려도 겹치지 않게 한다 */
-export function applyDraft(t: Trip, d: Draft, putFlight: (t: Trip, f: Flight) => void): Applied {
+export function applyDraft(t: Trip, d: Draft, putFlight: (t: Trip, f: Flight) => unknown): Applied {
   const res: Applied = { date: d.date, dateFrom: d.dateFrom, title: d.place?.name ?? d.flight?.flightNo ?? d.expense?.title ?? '', noPlace: d.noPlace }
   if (d.flight) {
     const same = t.flights.find((f) => f.flightNo === d.flight!.flightNo && f.depDate === d.flight!.depDate)

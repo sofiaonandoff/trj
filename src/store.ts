@@ -3,7 +3,8 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { DESTINATIONS, destination, type Destination } from './data/destinations'
 import { cityLabel, legEnds, newLegId } from './lib/legs'
-import { defaultChecklist, planTrip, type Pace } from './lib/planner'
+import { defaultChecklist, fitAfterArrival, planTrip, type Pace } from './lib/planner'
+import { airport } from './data/airports'
 import { addDays, dateRange, today, uid } from './lib/util'
 import { stamp } from './lib/merge'
 import type { Category, Day, DriveLink, Flight, Leg, Stay, Trip } from './types'
@@ -82,14 +83,18 @@ export function removeStay(t: Trip, id: string) {
   if (s.expenseId) t.expenses = t.expenses.filter((e) => e.id !== s.expenseId)
 }
 
-/** 항공편을 저장하고, 출발·도착일이 여행 기간 밖이면 기간을 넓힌다 */
-export function putFlight(t: Trip, f: Flight) {
+/**
+ * 항공편을 저장하고, 출발·도착일이 여행 기간 밖이면 기간을 넓힌다.
+ * 도착하기 전 시각에 잡힌 도착 도시의 장소는 도착 뒤로 옮긴다 (옮긴 수를 돌려준다).
+ */
+export function putFlight(t: Trip, f: Flight): { moved: number; nextDay: number } {
   const i = t.flights.findIndex((x) => x.id === f.id)
   if (i >= 0) t.flights[i] = f; else t.flights.push(f)
   t.flights.sort((a, b) => `${a.depDate}${a.depTime}`.localeCompare(`${b.depDate}${b.depTime}`))
   if (f.depDate < t.start) t.start = f.depDate
   if (f.arrDate > t.end) t.end = f.arrDate
   syncDays(t)
+  return fitAfterArrival(t, f, airport(f.to))
 }
 
 export interface LegInput { dest?: Destination; city: string; country?: string; lat?: number; lng?: number; start: string; end: string }
