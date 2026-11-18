@@ -582,4 +582,6 @@ export const EN: Record<string, string> = {
   "디르함": "Dirham",
   "리라": "Lira",
   "투그릭": "Tugrik",
+  "여행 기간은 {0}일까지 정할 수 있습니다": "Trips can be up to {0} days long",
+  "기간을 바꾸지 못했습니다": "Couldn't change the dates",
 }

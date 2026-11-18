@@ -39,9 +39,16 @@ export function fitLegs(t: Trip, prevStart: string) {
   if (!t.legs?.length) return
   const shift = dateRange(prevStart, t.start).length - 1 || -(dateRange(t.start, prevStart).length - 1)
   let legs = t.legs.map((l) => ({ ...l, start: addDays(l.start, shift), end: addDays(l.end, shift) }))
+  // 새 기간 안에 들어오는 구간만 남긴다. 하나도 안 남으면 첫 구간이 기간 전체를 맡는다
   legs = legs.filter((l) => l.start <= t.end)
+  if (!legs.length) legs = [{ ...t.legs[0] }]
+  legs[0].start = t.start
   legs[legs.length - 1].end = t.end
-  if (legs[0].start > t.start) legs[0].start = t.start
+  // 구간끼리 이어지게: 앞 구간이 끝나는 날 다음 구간이 시작한다 (기간 밖으로 나가지 않게)
+  for (let i = 1; i < legs.length; i++) {
+    if (legs[i].start < t.start) legs[i].start = t.start
+    if (legs[i - 1].end > legs[i].start) legs[i - 1].end = legs[i].start
+  }
   t.legs = legs.length > 1 ? legs : undefined
   if (legs.length === 1) Object.assign(t, { city: legs[0].city, lat: legs[0].lat, lng: legs[0].lng, destId: legs[0].destId })
 }

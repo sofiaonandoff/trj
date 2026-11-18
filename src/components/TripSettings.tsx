@@ -4,7 +4,9 @@ import { useEffect, useState } from 'react'
 import { trashTrip } from '../lib/drive'
 import { fitLegs } from '../lib/legs'
 import { removePhoto } from '../lib/photos'
-import { download } from '../lib/util'
+import { dateRange, download } from '../lib/util'
+
+const MAX_DAYS = 120
 import { syncDays, useStore } from '../store'
 import type { Trip } from '../types'
 import { Sheet, go, toast } from './ui'
@@ -26,9 +28,23 @@ export default function TripSettings({ trip, open, onClose, onDeleted }: { trip:
   const [alsoDrive, setAlsoDrive] = useState(mine)
   useEffect(() => { if (open) { setConfirm(false); setAlsoDrive(mine) } }, [open, mine])
 
+  // 입력 칸의 값은 따로 들고 있다가, 온전한 날짜일 때만 여행에 넣는다.
+  // (연도를 한 자리씩 칠 때 브라우저가 '0002-12-07' 같은 값을 보내므로, 그대로 넣으면 수십만 일짜리 여행이 되어 멈춘다)
+  const [draft, setDraft] = useState({ start: trip.start, end: trip.end })
+  useEffect(() => { setDraft({ start: trip.start, end: trip.end }) }, [trip.start, trip.end, open])
+  const sane = (d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d) && d >= '2000-01-01' && d <= '2100-12-31'
   const setDates = (start: string, end: string) => {
+    setDraft({ start, end })
+    if (!sane(start) || !sane(end)) return
     if (end < start) return toast(tr('돌아오는 날이 떠나는 날보다 빠릅니다'))
-    mutate(trip.id, (t) => { const prev = t.start; t.start = start; t.end = end; syncDays(t); fitLegs(t, prev) })
+    if (dateRange(start, end).length > MAX_DAYS) return toast(tr('여행 기간은 {0}일까지 정할 수 있습니다', MAX_DAYS))
+    if (start === trip.start && end === trip.end) return
+    try {
+      mutate(trip.id, (t) => { const prev = t.start; t.start = start; t.end = end; syncDays(t); fitLegs(t, prev) })
+    } catch {
+      toast(tr('기간을 바꾸지 못했습니다'))
+      setDraft({ start: trip.start, end: trip.end })
+    }
   }
 
   const counts = {
@@ -59,8 +75,8 @@ export default function TripSettings({ trip, open, onClose, onDeleted }: { trip:
     <Sheet open={open} onClose={onClose} title={tr('여행 관리')}>
       <div className="stack">
         <div className="row">
-          <label className="field"><span>{tr('떠나는 날')}</span><input type="date" value={trip.start} onChange={(e) => setDates(e.target.value, e.target.value > trip.end ? e.target.value : trip.end)} /></label>
-          <label className="field"><span>{tr('돌아오는 날')}</span><input type="date" value={trip.end} min={trip.start} onChange={(e) => setDates(trip.start, e.target.value)} /></label>
+          <label className="field"><span>{tr('떠나는 날')}</span><input type="date" value={draft.start} onChange={(e) => { const v = e.target.value; setDates(v, sane(v) && v > draft.end ? v : draft.end) }} /></label>
+          <label className="field"><span>{tr('돌아오는 날')}</span><input type="date" value={draft.end} min={draft.start} onChange={(e) => setDates(draft.start, e.target.value)} /></label>
         </div>
         <p className="hint" style={{ marginTop: -6 }}>{tr('기간을 줄이면 빠지는 날의 일정은 마지막 날로 옮겨집니다.')}</p>
 

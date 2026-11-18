@@ -59,13 +59,37 @@ export const AIRPORTS: Airport[] = [...CORE_AIRPORTS]
 const byCode = new Map(AIRPORTS.map((a) => [a.code, a]))
 export const airport = (code: string) => byCode.get(code)
 
+/** 도시 이름(한국어·영어, 소문자) → 공항 코드들. 항공권 사진에서 'Christchurch', 'Sydney (Kingsford Smith)'처럼 도시로 적힌 구간을 찾는다 */
+const cityIndex = new Map<string, string[]>()
+const intl = new Set<string>()
+const addCity = (city: string, code: string) => {
+  const k = city.trim().toLowerCase()
+  if (!k) return
+  const l = cityIndex.get(k) ?? []
+  if (!l.includes(code)) l.push(code)
+  cityIndex.set(k, l)
+}
+raw.forEach(([code, city]) => { addCity(city, code); addCity(tr(city), code) })
+/**
+ * 도시 이름으로 공항 코드를 찾는다. 같은 이름의 도시가 여럿이면(시드니: 호주·캐나다)
+ * 자주 가는 공항 → 국제공항 → 먼저 나온 것 순으로 고른다. 세계 공항을 불러온 뒤에 영어 이름도 찾는다
+ */
+export function airportByCity(name: string): string | undefined {
+  const l = cityIndex.get(name.trim().toLowerCase())
+  if (!l) return undefined
+  return l.find((c) => CORE_AIRPORTS.some((a) => a.code === c)) ?? l.find((c) => intl.has(c)) ?? l[0]
+}
+
 let world: Promise<void> | null = null
 /** 세계 공항 목록을 불러와 AIRPORTS에 더한다 (한 번만). 항공편 해석 전에 기다린다 */
 export function loadWorldAirports(): Promise<void> {
   world ??= import('./airportsWorld').then(({ default: data }) => {
     for (const line of data.split('\n')) {
       const [code, city, name, lat, lng, tz] = line.split('|')
-      if (!code || byCode.has(code)) continue
+      if (!code) continue
+      addCity(city, code)
+      if (/international/i.test(name)) intl.add(code)
+      if (byCode.has(code)) continue
       const a = { code, city, name, lat: Number(lat), lng: Number(lng), tz }
       AIRPORTS.push(a)
       byCode.set(code, a)

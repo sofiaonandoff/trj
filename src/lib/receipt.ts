@@ -1,6 +1,6 @@
 import { tr } from '../i18n'
 import type { Category, ExpenseCategory, Flight } from '../types'
-import { AIRLINES, AIRPORTS } from '../data/airports'
+import { AIRLINES, AIRPORTS, airportByCity } from '../data/airports'
 import { isComplete, parseFlightText } from './flight'
 import { addDays, dateRange } from './util'
 
@@ -272,10 +272,11 @@ export function findCode(text: string): string | undefined {
 
 const CURRENCY: [RegExp, string][] = [
   [/฿|THB|บาท/i, 'THB'], [/₩|KRW|원(?![가-힣])|\bW(?=\d{1,3}[,.]\d)/, 'KRW'], [/NT\$|TWD|NTD|元/i, 'TWD'], [/¥|円|JPY/i, 'JPY'], [/CNY|RMB|人民币/i, 'CNY'],
-  [/₫|VND|đ(?![a-z])/i, 'VND'], [/€|EUR/i, 'EUR'], [/£|GBP/i, 'GBP'], [/HK\$|HKD/i, 'HKD'], [/S\$|SGD/i, 'SGD'], [/US\$|USD|\$/i, 'USD'],
+  [/₫|VND|đ(?![a-z])/i, 'VND'], [/€|EUR/i, 'EUR'], [/£|GBP/i, 'GBP'], [/HK\$|HKD/i, 'HKD'], [/S\$|SGD/i, 'SGD'], [/NZ\$|\bNZD\b/, 'NZD'], [/A\$|\bAUD\b/, 'AUD'], [/C\$|\bCAD\b/, 'CAD'], [/\bMYR\b|\bRM(?=\s?\d)/, 'MYR'],
+  [/₱|\bPHP\b/, 'PHP'], [/\bIDR\b|\bRp(?=\s?\d)/, 'IDR'], [/\bCHF\b/, 'CHF'], [/\bAED\b/, 'AED'], [/US\$|USD|\$/i, 'USD'],
 ]
 export function findCurrency(text: string, fallback: string): string {
-  for (const [re, code] of CURRENCY) if (re.test(text)) return code === 'USD' && /HK\$|S\$|NT\$/.test(text) ? fallback : code
+  for (const [re, code] of CURRENCY) if (re.test(text)) return code === 'USD' && /HK\$|S\$|NT\$|NZ\$|A\$|C\$/.test(text) ? fallback : code
   return fallback
 }
 
@@ -346,6 +347,9 @@ export function findName(lines: OcrLine[]): string | undefined {
  * 2) 시간표 (항공사 앱 예약 조회): 2026년 12월 02일 / 18:25 ICN / 09:55 +1일 AKL / KE411 B787-10 / 좌석 45B
  * parseFlightText는 편명 뒤의 글자만 보므로, 편명 앞에 나오는 구간·날짜·시각을 화면 전체에서 채운다.
  */
+/** 표 머리글·상태 낱말 중 도시 이름과 겹치는 것 */
+const NOT_CITY = new Set(['date', 'status', 'economy', 'business', 'terminal', 'confirmed', 'flight', 'operated', 'departing', 'arriving', 'non-stop', 'aircraft', 'sale', 'class', 'premium', 'first', 'seat', 'gate', 'time', 'est', 'journey', 'total', 'amount', 'card', 'master', 'reference', 'issued'])
+
 export function flightFromTable(text: string, days: string[]): Flight | null {
   const year = Number((days[0] ?? '').slice(0, 4)) || new Date().getFullYear()
   const lines = text.split('\n')
@@ -379,7 +383,7 @@ export function flightFromTable(text: string, days: string[]): Flight | null {
     for (const c of iata) if (!allCodes.includes(c)) allCodes.push(c)
   }
   if (!from) {
-    const byCity = (name: string) => { const n = name.trim().toLowerCase(); return n.length >= 3 ? AIRPORTS.find((a) => a.city.toLowerCase() === n)?.code : undefined }
+    const byCity = (name: string) => (name.trim().length >= 3 ? airportByCity(name.replace(/[^\p{L} .'-]/gu, '').trim()) : undefined)
     for (const l of lines) {
       const m = l.match(/^(.*?\S)\s+(?:to|→|->|–|—|-|✈)\s+(\S.*)$/i)
       if (!m) continue
@@ -390,12 +394,34 @@ export function flightFromTable(text: string, days: string[]): Flight | null {
       if (x && y && x !== y) { [from, to] = [x, y]; break }
     }
   }
+  // 표 모양 일정표 (Departing | Arriving 칸): 편명이 있는 줄부터 몇 줄 안에 나오는 도시 이름을 순서대로
+  //   10 Dec 26  QF 8765 operated by  Christchurch 6:10PM  Sydney (Kingsford Smith) 7:40PM
+  if (!from) {
+    const at = lines.findIndex((l) => l.replace(/\s/g, '').toUpperCase().includes(flightNo!))
+    const near = at >= 0 ? lines.slice(at, at + 4) : []
+    const found: string[] = []
+    for (const l of near) {
+      const words = l.replace(/\([^)]*\)?/g, ' ').split(/[^\p{L}'.-]+/u).filter(Boolean)
+      for (let i = 0; i < words.length; i++) {
+        for (const n of [3, 2, 1]) {
+          const w = words.slice(i, i + n)
+          if (w.length < n || !/^\p{Lu}/u.test(w[0]) || NOT_CITY.has(w.join(' ').toLowerCase())) continue
+          const c = airportByCity(w.join(' '))
+          if (c) { if (!found.includes(c)) found.push(c); i += n - 1; break }
+        }
+      }
+    }
+    if (found.length >= 2) [from, to] = found
+  }
   if (!from && allCodes.length >= 2) [from, to] = allCodes
   if (!from || !to) return null
 
   // 출발일: 출발일 항목이 있으면 그 줄, 없으면 화면의 첫 날짜
   const depLine = lines.find((l) => /출발\s*일|departure\s*date|출국|가는\s*날|出発日/i.test(l)) ?? ''
-  const depDate = findDates(depLine, year)[0] ?? findDates(text, year)[0] ?? pickTripDate(text, days)
+  // 편명 줄과 그 근처의 날짜를 먼저 본다 (발권일 'Issued 29 Oct 26' 같은 다른 날짜를 피한다)
+  const fi = lines.findIndex((l) => l.replace(/\s/g, '').toUpperCase().includes(flightNo))
+  const nearDates = fi >= 0 ? findDates(lines.slice(Math.max(0, fi - 1), fi + 4).join('\n'), year) : []
+  const depDate = findDates(depLine, year)[0] ?? nearDates[0] ?? findDates(text, year)[0] ?? pickTripDate(text, days)
 
   // 시각: "12:15~21:15", "1:05pm → 2:30pm", 출발/도착 시간 항목, 또는 공항 코드와 같은 줄의 시각.
   // 체크인·탑승 마감 시각은 항공편 시각이 아니므로 뺀다
@@ -407,7 +433,7 @@ export function flightFromTable(text: string, days: string[]): Flight | null {
     return `${String(n).padStart(2, '0')}:${mm}`
   }
   const hhmm = (l: string) => { const m = l.match(new RegExp(T)); return m ? to24(m[1], m[2], m[3]) : undefined }
-  const NOT_FLIGHT_TIME = /close|마감|check[\s-]*in|boarding|탑승|gate|게이트|체크인/i
+  const NOT_FLIGHT_TIME = /close|마감|check[\s-]*in|boarding|탑승|gate|게이트|체크인|journey|duration|flight\s*time|소요|비행\s*시간/i
   const timeLines = lines.filter((l) => !NOT_FLIGHT_TIME.test(l))
   const range = timeLines.map((l) => l.match(new RegExp(`${T}\\s*(?:[~\\-–—>→]|to)\\s*${T}(\\s*\\(?\\+1\\)?)?`))).find(Boolean)
   const labeledTime = (re: RegExp) => { const l = lines.find((x) => re.test(x)); return l ? hhmm(l.replace(re, ' ')) : undefined }
