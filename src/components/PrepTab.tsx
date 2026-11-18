@@ -1,17 +1,18 @@
 import { tr } from '../i18n'
-import { Check, X } from 'lucide-react'
+import { Check, Mail, UserPlus, X } from 'lucide-react'
 import { useState } from 'react'
 import { destination } from '../data/destinations'
 import { haptic, uid } from '../lib/util'
 import { MEMBER_COLORS, useStore } from '../store'
 import type { Trip } from '../types'
+import Companions from './Companions'
 import { Avatar, toast } from './ui'
 
 export default function PrepTab({ trip }: { trip: Trip }) {
   const mutate = useStore((s) => s.mutate)
   const [text, setText] = useState('')
   const [group, setGroup] = useState(tr('짐'))
-  const [person, setPerson] = useState('')
+  const [people, setPeople] = useState(false)
   const dest = destination(trip.destId)
   const groups = [...new Set(trip.checklist.map((c) => c.group))]
   const done = trip.checklist.filter((c) => c.done).length
@@ -23,17 +24,6 @@ export default function PrepTab({ trip }: { trip: Trip }) {
     if (!v) return
     mutate(trip.id, (t) => { t.checklist.push({ id: uid(), text: v, group, done: false }) })
     setText('')
-  }
-  const addPerson = () => {
-    const v = person.trim()
-    if (!v) return
-    if (trip.members.some((m) => m.name === v)) return toast(tr('같은 이름이 이미 있습니다'))
-    mutate(trip.id, (t) => { t.members.push({ id: uid(), name: v, color: MEMBER_COLORS[t.members.length % MEMBER_COLORS.length] }) })
-    setPerson('')
-  }
-  const removePerson = (id: string) => {
-    if (trip.expenses.some((e) => e.payer === id || e.split.includes(id))) return toast(tr('지출 기록에 있는 사람은 뺄 수 없습니다'))
-    mutate(trip.id, (t) => { t.members = t.members.filter((m) => m.id !== id); t.checklist.forEach((c) => { if (c.assignee === id) c.assignee = undefined }) })
   }
   /** 담당자를 차례로 바꾼다: 없음 → 첫 사람 → … → 없음 */
   const cycle = (itemId: string) => mutate(trip.id, (t) => {
@@ -95,20 +85,15 @@ export default function PrepTab({ trip }: { trip: Trip }) {
       </section>
 
       <section className="panel">
-        <h2>{tr('함께 가는 사람')}</h2>
-        <div className="chips">
-          {trip.members.map((m) => (
-            <span key={m.id} className="chip"><Avatar m={m} />{m.name}
-              {trip.members.length > 1 && <button aria-label={tr('{0} 빼기', m.name)} onClick={() => removePerson(m.id)}><X size={14} /></button>}
-            </span>
-          ))}
+        <div className="between"><h2 style={{ margin: 0 }}>{tr('함께 가는 사람')}</h2>
+          <button className="btn btn-quiet" onClick={() => setPeople(true)}><UserPlus size={16} />{tr('동행 관리')}</button>
         </div>
-        <div className="inline-add">
-          <input className="input" placeholder={tr('이름 추가')} value={person} onChange={(e) => setPerson(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addPerson()} />
-          <button className="btn btn-ghost" disabled={!person.trim()} onClick={addPerson}>{tr('추가')}</button>
+        <div className="chips" style={{ marginTop: 10 }}>
+          {trip.members.map((m) => <span key={m.id} className="chip"><Avatar m={m} />{m.name}{m.email && <Mail size={12} aria-label={tr('초대함')} />}</span>)}
         </div>
-        <p className="hint">{tr('여행 전체를 동행에게 보내려면 오른쪽 위 공유 버튼에서 링크를 만드세요.')}</p>
+        <p className="hint">{tr('동행 추가·빼기와 이메일 초대는 동행 관리에서 합니다. 여행 화면 위의 얼굴 아이콘으로도 열 수 있습니다.')}</p>
       </section>
+      <Companions trip={trip} open={people} onClose={() => setPeople(false)} />
     </>
   )
 }

@@ -1,6 +1,6 @@
 import { tr } from '../i18n'
 import { motion } from 'framer-motion'
-import { ArrowLeft, BookOpen, Download, Link2, ListChecks, MoreHorizontal, Route, Share2, Wallet } from 'lucide-react'
+import { ArrowLeft, BookOpen, Download, Link2, ListChecks, MoreHorizontal, Route, Share2, UserPlus, Wallet } from 'lucide-react'
 import { useState } from 'react'
 import { shareLink } from '../lib/share'
 import { diffDays, download, fmtRange, haptic, today } from '../lib/util'
@@ -12,6 +12,7 @@ import JournalTab from './JournalTab'
 import PlanTab from './PlanTab'
 import PrepTab from './PrepTab'
 import TripSettings from './TripSettings'
+import Companions from './Companions'
 import { Avatars, RouteArt, Sheet, copy, go, toast } from './ui'
 
 const TABS = [
@@ -28,6 +29,7 @@ export default function TripPage({ id }: { id: string }) {
   const [tab, setTab] = useState<TabId>('plan')
   const [sharing, setSharing] = useState(false)
   const [managing, setManaging] = useState(false)
+  const [people, setPeople] = useState(false)
 
   if (!trip) {
     return (
@@ -52,7 +54,7 @@ export default function TripPage({ id }: { id: string }) {
         </div>
         <div className="meta">
           <p><span className="num">{badge}</span>{fmtRange(trip.start, trip.end)}</p>
-          <span className="head-actions"><DriveChip compact /><Avatars members={trip.members} /></span>
+          <span className="head-actions"><DriveChip compact /><button className="avatars-btn" onClick={() => setPeople(true)} aria-label={tr('동행 관리')}><Avatars members={trip.members} /><UserPlus size={15} /></button></span>
         </div>
       </header>
 
@@ -75,6 +77,7 @@ export default function TripPage({ id }: { id: string }) {
       </nav>
 
       <TripSettings trip={trip} open={managing} onClose={() => setManaging(false)} />
+      <Companions trip={trip} open={people} onClose={() => setPeople(false)} />
       <ShareSheet trip={trip} open={sharing} onClose={() => setSharing(false)} onJournal={() => { setTab('journal'); scrollTo(0, 0) }} onManage={() => setManaging(true)} />
     </div>
   )
