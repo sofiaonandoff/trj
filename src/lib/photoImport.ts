@@ -3,9 +3,9 @@ import type { Expense, Flight, Place, Stay, Trip } from '../types'
 import { loadWorldAirports } from '../data/airports'
 import { reverseGeocode, searchPlaces } from './geocode'
 import { legOf } from './legs'
-import { ocrPasses, recognizeLines } from './ocr'
+import { ocrPasses, recognize, recognizeBand } from './ocr'
 import { readExif } from './photos'
-import { readText } from './receipt'
+import { readText, stayLabelLine, stayOf } from './receipt'
 import { putStay, removeStay } from '../store'
 import { addDays, fromMin, km, toMin, travelMin, uid } from './util'
 
@@ -55,11 +55,33 @@ export async function readTripPhoto(file: File, trip: Trip, current: string, onS
   const exif = pdf ? {} : await readExif(file)
   const here = legOf(trip, current)
   onStage?.(tr('글자를 읽는 중'))
-  const lines = pdf
-    ? await import('./pdfText').then((m) => m.pdfLines(file)).catch(() => [])
-    : await recognizeLines(file, ocrPasses(here.country ?? trip.country), (p) => onStage?.(tr('글자 인식 준비 중 {0}%', Math.round(p * 100)))).catch(() => [])
+  const ocr = pdf
+    ? { lines: await import('./pdfText').then((m) => m.pdfLines(file)).catch(() => []), langs: [] as string[], scale: 1, confidence: 100 }
+    : await recognize(file, ocrPasses(here.country ?? trip.country), (p) => onStage?.(tr('글자 인식 준비 중 {0}%', Math.round(p * 100)))).catch(() => ({ lines: [], langs: [] as string[], scale: 1, confidence: 0 }))
+  const lines = ocr.lines
   await loadWorldAirports()
   const r = readText(lines, days, trip.currency)
+
+  // 숙소 화면인데 체크인·체크아웃이 제대로 안 읽혔으면 그 칸만 크게 키워 다시 읽는다
+  const st = r.stay
+  const shaky = !st?.checkIn || !st.checkOut || st.checkOut <= st.checkIn || !st.inTime || !st.outTime
+  const label = !pdf && r.category === 'stay' && shaky ? stayLabelLine(lines) : undefined
+  if (label) {
+    onStage?.(tr('체크인·체크아웃을 다시 읽는 중'))
+    const k = ocr.scale || 1
+    const band = await recognizeBand(file, (label.top - label.height) / k, (label.top + label.height * 6) / k, ocr.langs.length ? ocr.langs : ['eng', 'kor']).catch(() => [])
+    const again = stayOf(band.map((l) => l.text), days)
+    if (again?.checkIn) {
+      const keep = r.stay ?? {}
+      r.stay = {
+        ...keep,
+        checkIn: again.checkIn,
+        checkOut: again.checkOut && again.checkOut > again.checkIn ? again.checkOut : keep.checkOut,
+        inTime: again.inTime ?? keep.inTime,
+        outTime: again.outTime ?? keep.outTime,
+      }
+    }
+  }
   const out: Draft[] = r.flights.map((f) => ({ date: f.depDate, dateFrom: 'image' as const, flight: f }))
   if (out.length) {
     // 항공권: 항공편으로 넣고, 금액이 있으면 교통비로 예산에 남긴다 (일정에 장소로는 넣지 않는다)
@@ -82,7 +104,21 @@ export async function readTripPhoto(file: File, trip: Trip, current: string, onS
   onStage?.(tr('장소를 찾는 중'))
   let name = r.name
   let where: { lat: number; lng: number } | undefined
-  if (!r.costOnly) {
+  // 숙소 화면에서 주소를 읽었으면 그 주소로 위치를 찾는다 ('Tauranga의 숙소'의 도시 이름을 함께 붙여서)
+  const stayAddress = r.category === 'stay' && r.stay?.address
+    ? (r.stay.city && !r.stay.address.toLowerCase().includes(r.stay.city.toLowerCase()) ? `${r.stay.address}, ${r.stay.city}` : r.stay.address)
+    : undefined
+  if (stayAddress) {
+    const around = legOf(trip, r.stay?.checkIn ?? date)
+    const tries = r.stay?.city ? [stayAddress, r.stay.address!] : [stayAddress]
+    for (const q of tries) {
+      const hits = (await searchPlaces(q, around).catch(() => [])).filter((x) => !x.airport)
+      // 도시 이름까지 맞춰 찾은 결과는 여행 도시와 멀어도 믿는다 (다른 도시 숙소). 주소만이면 가까운 곳만
+      const hit = q === stayAddress && r.stay?.city ? hits.find((x) => km(around, x) <= 3000) : hits.find((x) => km(around, x) <= 150)
+      if (hit) { where = { lat: hit.lat, lng: hit.lng }; break }
+    }
+  }
+  if (!r.costOnly && !where) {
     if (gps) {
       where = gps
       // 영수증이면 글자 속 가게 이름을, 풍경 사진이면 그 위치의 장소 이름을 쓴다
@@ -101,7 +137,10 @@ export async function readTripPhoto(file: File, trip: Trip, current: string, onS
     const checkOut = r.stay.checkOut && r.stay.checkOut > checkIn ? r.stay.checkOut : addDays(checkIn, 1)
     out.push({
       date: checkIn, dateFrom: 'image', expense: expense && { ...expense, category: 'stay', date: checkIn },
-      stay: { id: uid(), name, ...loc, checkIn, checkOut, inTime: r.stay.inTime, outTime: r.stay.outTime, code: r.code },
+      stay: {
+        id: uid(), name, ...loc, checkIn, checkOut, inTime: r.stay.inTime, outTime: r.stay.outTime, code: r.code,
+        address: stayAddress, note: r.stay.host ? tr('호스트 {0}', r.stay.host) : undefined,
+      },
     })
     return out
   }

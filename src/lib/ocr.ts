@@ -24,7 +24,9 @@ export function localLang(country = ''): string | undefined {
 
 /** 읽을 언어 조합들. 첫 번째는 늘 영어(+한국어) */
 export function ocrPasses(country = ''): string[][] {
-  const base = lang === 'ko' || /한국|korea/i.test(country) ? ['eng', 'kor'] : ['eng']
+  // 화면 언어와 상관없이 한국어도 읽는다: 한국 앱(에어비앤비 한국어 화면, 항공사 앱) 캡처가 많다
+  void lang; void country
+  const base = ['eng', 'kor']
   const local = localLang(country)
   return local ? [base, ['eng', local]] : [base]
 }
@@ -167,10 +169,13 @@ export function despaceCJK(line: string): string {
   return out.replace(new RegExp(`(?<=[${CJK}])\\s+(?=[.,)])`, 'gu'), '')
 }
 
-export interface OcrResult { lines: OcrLine[]; confidence: number; langs: string[] }
+export interface OcrResult { lines: OcrLine[]; confidence: number; langs: string[]; /** 원본 대비 읽은 그림의 배율 (줄 위치를 원본 좌표로 바꿀 때) */ scale?: number }
 
-async function readOnce(canvas: HTMLCanvasElement, langs: string[], onProgress?: (p: number) => void): Promise<OcrResult> {
+async function readOnce(canvas: HTMLCanvasElement, langs: string[], onProgress?: (p: number) => void, psm = '6'): Promise<OcrResult> {
   const worker = await workerFor(langs, onProgress)
+  // 6: 한 덩어리 글(Tesseract.js 기본값, 영수증 금액 칸을 잘 읽는다), 11: 흩어진 글자.
+  // 워커를 같이 쓰므로 매번 정해 준다 (3으로 두면 오른쪽 금액 칸이 통째로 빠진다)
+  await worker.setParameters({ tessedit_pageseg_mode: psm } as never)
   const { data } = await worker.recognize(canvas, {}, { blocks: true, text: true })
   type Line = { text: string; bbox: { y0: number; y1: number }; confidence: number }
   const raw: Line[] = (data.blocks ?? []).flatMap((b: { paragraphs: { lines: Line[] }[] }) => b.paragraphs.flatMap((p) => p.lines))
@@ -185,8 +190,14 @@ async function readOnce(canvas: HTMLCanvasElement, langs: string[], onProgress?:
 }
 
 /** 언어 조합마다 읽어 보고 가장 믿을 만한 결과를 고른다 */
+/** 흩어진 글자 방식으로 한 번 더 읽는다 (해석 결과가 빈약할 때 photoImport가 부른다) */
+export async function recognizeSparse(file: Blob, langs: string[]): Promise<OcrLine[]> {
+  return (await readOnce(await prepare(file), langs, undefined, '11')).lines
+}
+
 export async function recognize(file: Blob, passes: string[][], onProgress?: (p: number) => void): Promise<OcrResult> {
   const canvas = await prepare(file)
+  const bmpW = (await createImageBitmap(file)).width
   // 확신도가 비슷하면 더 많은 글자를 읽은 쪽
   const score = (x: OcrResult) => x.confidence + Math.min(12, x.lines.length * 1.5)
   let best: OcrResult | undefined
@@ -194,7 +205,7 @@ export async function recognize(file: Blob, passes: string[][], onProgress?: (p:
     const r = await readOnce(canvas, langs, onProgress)
     if (!best || score(r) > score(best)) best = r
     // 충분히 잘 읽었으면 더 하지 않는다
-    if (best.confidence >= 88 && best.lines.length >= 3) return best
+    if (best.confidence >= 88 && best.lines.length >= 3) return { ...best, scale: canvas.width / bmpW }
   }
   // 다듬은 사진으로 잘 안 읽히면 원본 그대로도 읽어 본다 (흐린 사진은 대비를 늘리면 오히려 나빠질 때가 있다)
   if (best!.confidence < 80) {
@@ -202,7 +213,24 @@ export async function recognize(file: Blob, passes: string[][], onProgress?: (p:
     const r = await readOnce(raw, best!.langs, onProgress)
     if (score(r) > score(best!)) best = r
   }
-  return best!
+  return { ...best!, scale: canvas.width / bmpW }
+}
+
+/**
+ * 사진의 가로 띠 한 부분만 크게 키워 다시 읽는다 (원본 좌표 top~bottom).
+ * 숙소 앱의 체크인·체크아웃 칸처럼 사진·아이콘에 둘러싸여 잘 안 읽히는 작은 부분을 다시 볼 때 쓴다.
+ */
+export async function recognizeBand(file: Blob, top: number, bottom: number, langs: string[]): Promise<OcrLine[]> {
+  const bmp = await createImageBitmap(file)
+  const y0 = Math.max(0, Math.floor(top)), y1 = Math.min(bmp.height, Math.ceil(bottom))
+  if (y1 - y0 < 8) return []
+  const k = Math.min(3, Math.max(1, 1600 / bmp.width))
+  const c = document.createElement('canvas')
+  c.width = Math.round(bmp.width * k); c.height = Math.round((y1 - y0) * k)
+  const g = c.getContext('2d')!
+  g.imageSmoothingQuality = 'high'
+  g.drawImage(bmp, 0, y0, bmp.width, y1 - y0, 0, 0, c.width, c.height)
+  return (await readOnce(c, langs)).lines
 }
 
 export async function recognizeLines(file: Blob, langs: string[] | string[][], onProgress?: (p: number) => void): Promise<OcrLine[]> {

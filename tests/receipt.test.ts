@@ -1,5 +1,5 @@
 import { despaceCJK } from '../src/lib/ocr'
-import { findCode, findStayDates, findDates, findName, findTime, findTotal, fixBrand, parseAmount, pickTripDate, readText } from '../src/lib/receipt'
+import { findCode, findStayDates, findStayInfo, stayTime, findDates, findName, findTime, findTotal, fixBrand, parseAmount, pickTripDate, readText } from '../src/lib/receipt'
 
 import { loadWorldAirports } from '../src/data/airports'
 await loadWorldAirports()
@@ -63,5 +63,15 @@ const se = findStayDates('Riva Surya Bangkok Hotel\nCheck-in: Thursday, December
 check('숙소 예약(영문 PDF): 날짜', se?.checkIn === '2026-12-03' && se?.checkOut === '2026-12-05', se)
 const sn = findStayDates('체크인\n2026년 12월 3일 (목) 15:00\n체크아웃\n2026년 12월 5일 (토) 11:00', days)
 check('숙소 예약: 날짜가 다음 줄에 있는 화면', sn?.checkIn === '2026-12-03' && sn?.checkOut === '2026-12-05' && sn?.inTime === '15:00', sn)
+// 실제 사용자 캡처: 에어비앤비 예약 화면 (체크인·체크아웃이 나란히, OCR이 오전·오후를 깨뜨려 읽음)
+const nzDays = ['2026-12-02', '2026-12-14']
+const ab = (rows: string[]) => findStayDates(rows.join('\n'), nzDays)
+check('에어비앤비: 나란히 놓인 체크인·체크아웃', JSON.stringify(ab(['체크인            체크아웃', '12월 3일 (목)        12월 5일 (토)', '오후 3.00          오후 12:00'])) === JSON.stringify({ checkIn: '2026-12-03', checkOut: '2026-12-05', inTime: '15:00', outTime: '12:00' }), ab(['체크인            체크아웃', '12월 3일 (목)        12월 5일 (토)', '오후 3.00          오후 12:00']))
+check('에어비앤비: 오전이 깨져 읽힌 시각(272110:00)', JSON.stringify(ab(['체크인                                  체크아웃', '12월 7일 (월)                      12월 8일 (화)', '23 2:00                           272110:00'])) === JSON.stringify({ checkIn: '2026-12-07', checkOut: '2026-12-08', inTime: '14:00', outTime: '10:00' }), ab(['체크인                                  체크아웃', '12월 7일 (월)                      12월 8일 (화)', '23 2:00                           272110:00']))
+check('숙소 시각: 오후 12:00은 정오', stayTime('오후 12:00', false) === '12:00' && stayTime('오전10:00', false) === '10:00')
+const info = findStayInfo(['Taurangal| 숙소', '2 A E:Shaina 님', '체크인            체크아웃', '© 찾아가는 방법', '15 Lily Way', 'O09 숙소이용규칙'])
+check('에어비앤비: 도시·호스트·주소', info.city === 'Tauranga' && info.host === 'Shaina' && info.address === '15 Lily Way', info)
+const info2 = findStayInfo(['od 숙소', '프', '리미엄 마스터 욕조 |15분 - 공항', '© 찾아가는 방법', '38 Hamilton Road'])
+check('에어비앤비: 숙소 소개 제목(끊겨 읽힌 줄 잇기)', info2.name === '프리미엄 마스터 욕조 |15분 - 공항' && info2.address === '38 Hamilton Road', info2)
 console.log(fail ? `${fail}개 실패` : '모두 통과')
 process.exit(fail ? 1 : 0)
