@@ -98,7 +98,7 @@ export function loadWorldAirports(): Promise<void> {
   return world
 }
 
-const AIRLINES_KO: Record<string, string> = {
+export const AIRLINES_KO: Record<string, string> = {
   KE: '대한항공', OZ: '아시아나항공', '7C': '제주항공', LJ: '진에어', TW: '티웨이항공', BX: '에어부산',
   RS: '에어서울', ZE: '이스타항공', YP: '에어프레미아', RF: '에어로케이', JL: '일본항공', NH: '전일본공수',
   MM: '피치항공', CI: '중화항공', BR: '에바항공', CX: '캐세이퍼시픽', TG: '타이항공', VN: '베트남항공',

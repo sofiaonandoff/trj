@@ -1,4 +1,5 @@
 import { lang, tr } from '../i18n'
+import { flightList, type AirportChoice } from './flightList'
 import { categoryByName } from '../data/destinations'
 import type { Category, ExpenseCategory, Flight } from '../types'
 import { AIRLINES, AIRPORTS, airportByCity } from '../data/airports'
@@ -25,6 +26,8 @@ export interface Reading {
   /** 들를 곳 없이 비용만 있는 것 (택시, 교통카드 등) */
   costOnly: boolean
   flights: Flight[]
+  /** 항공편마다 줄임말 공항(KK 등)의 다른 후보 */
+  flightChoices?: (AirportChoice[] | undefined)[]
   /** 숙소 예약 화면이면 체크인·체크아웃 */
   stay?: { checkIn?: string; checkOut?: string; inTime?: string; outTime?: string; address?: string; city?: string; host?: string; room?: string }
   /** 투어·액티비티 바우처(GetYourGuide, Klook, KKday 등)면 만나는 곳과 안내 */
@@ -581,7 +584,10 @@ export function readText(all: OcrLine[], days: string[], tripCurrency: string): 
   const year = Number((days[0] ?? '').slice(0, 4)) || new Date().getFullYear()
   // 숙소 확인 화면(체크아웃이 있는)에서는 항공편을 만들지 않는다
   const hotelPage = /check[\s-]*out|체크\s*아웃|チェックアウト/i.test(text) && !/편명|flight\s*no|boarding|탑승/i.test(text)
-  let flights: Flight[] = hotelPage ? [] : parseFlightText(text, year).filter(isComplete)
+  // 메모에 적어 둔 항공편 목록 (편명이 없어도, 여러 편을 한 번에)
+  const listed = hotelPage ? [] : flightList(lines.map((l) => l.text), days)
+  const flightChoices = listed.map((f) => f.choices)
+  let flights: Flight[] = hotelPage ? [] : listed.length ? listed.map(({ choices: _c, ...f }) => f) : parseFlightText(text, year).filter(isComplete)
   if (!flights.length && !hotelPage) { const t = flightFromTable(lines.filter((l) => !CHROME.test(l.text)).map((l) => l.text).join('\n'), days); if (t) flights = [t] }
   flights = flights.map((f, i) => ({ ...f, id: `ocr${Date.now()}${i}` }))
   // 투어·액티비티 바우처: 숙소(체크아웃 있는) 화면이 아니면, 피자집 안내 같은 낱말보다 먼저 본다
@@ -620,6 +626,7 @@ export function readText(all: OcrLine[], days: string[], tripCurrency: string): 
     expenseCategory: kind?.exp ?? (amount ? 'etc' : 'play'),
     costOnly: Boolean(kind?.costOnly),
     flights,
+    flightChoices: listed.length && flightChoices.some(Boolean) ? flightChoices : undefined,
     stay: stay || info.city ? { ...stay, city: stay?.city ?? info.city, room: info.room } : undefined,
     tour: tour?.info,
   }

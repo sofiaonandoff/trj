@@ -1,13 +1,14 @@
 import { tr } from '../i18n'
 import { BedDouble, CalendarCheck, Loader2, Plane, Receipt, Undo2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { applyDraft, dateFromLabel, readTripPhoto, switchStay, undoApplied, type Applied, type StayChoice } from '../lib/photoImport'
+import { applyDraft, dateFromLabel, readTripPhoto, switchAirport, switchStay, undoApplied, type Applied, type StayChoice } from '../lib/photoImport'
 import { md, won } from '../lib/util'
 import { putFlight, useStore } from '../store'
 import type { Trip } from '../types'
 import { Sheet } from './ui'
+import { airport } from '../data/airports'
 
-interface Job { id: number; url: string; status: 'reading' | 'done' | 'error'; stage?: string; results: (Applied & { undone?: boolean })[]; error?: string }
+interface Job { id: number; url: string; status: 'reading' | 'done' | 'error'; stage?: string; results: (Applied & { undone?: boolean; picked?: Record<string, string> })[]; error?: string }
 
 const money = (a: { value: number; currency: string }) => (a.currency === 'KRW' ? won(a.value) : `${a.value.toLocaleString()} ${a.currency}`)
 
@@ -62,6 +63,19 @@ export default function PhotoImport({ trip, files, current, onClose, onGo }: { t
     mutate(trip.id, (t) => switchStay(t, a.stayId!, c))
     setJobs((js) => js.map((j) => (j.id === jobId ? { ...j, results: j.results.map((r, i) => (i === k ? { ...r, title: c.name } : r)) } : j)))
   }
+  /** 줄임말 공항(KK 등)을 고르면 같은 사진에서 같은 줄임말을 쓴 항공편을 모두 바꾼다 */
+  const pickAirport = (jobId: number, word: string, code: string) => {
+    const job = jobs.find((j) => j.id === jobId)
+    if (!job) return
+    mutate(trip.id, (t) => {
+      for (const r of job.results) for (const c of r.airportChoices ?? []) if (r.flightId && !r.undone && c.word === word) switchAirport(t, r.flightId, c.side, code)
+    })
+    setJobs((js) => js.map((j) => (j.id !== jobId ? j : { ...j, results: j.results.map((r) => {
+      if (!r.flightId || !r.airportChoices?.some((c) => c.word === word)) return r
+      const f = useStore.getState().trips.find((t) => t.id === trip.id)?.flights.find((x) => x.id === r.flightId)
+      return f ? { ...r, title: r.title.replace(/[A-Z]{3} → [A-Z]{3}$/, `${f.from} → ${f.to}`), picked: { ...(r.picked ?? {}), [word]: code } } : r
+    }) })))
+  }
   const busy = jobs.some((j) => j.status === 'reading')
   const moved = jobs.flatMap((j) => j.results).find((r) => !r.undone && !r.flightId && r.date !== current && dayNo(r.date) > 0)
 
@@ -99,6 +113,18 @@ export default function PhotoImport({ trip, files, current, onClose, onGo }: { t
                         </span>
                       </span>
                     )}
+                    {!r.undone && r.flightId && r.airportChoices?.filter((c) => j.results.findIndex((x) => x.airportChoices?.some((y) => y.word === c.word)) === k).map((c) => (
+                      <span className="choice-row" key={c.word}>
+                        <small className="mute">{tr("'{0}'가 어느 공항인지 확인하세요 (비행시간으로 골랐습니다)", c.word)}</small>
+                        <span className="chips">
+                          {c.options.map((code) => (
+                            <button key={code} className="chip" aria-pressed={(r.picked?.[c.word] ?? c.options[0]) === code} onClick={() => pickAirport(j.id, c.word, code)}>
+                              {airport(code)?.city ?? code} ({code})
+                            </button>
+                          ))}
+                        </span>
+                      </span>
+                    ))}
                     {r.noPlace && <small className="mute">{tr('위치를 찾지 못해 예산에만 기록했습니다')}</small>}
                     {r.duplicate && <small className="mute">{tr('이미 들어 있어 다시 넣지 않았습니다')}</small>}
                     {r.undone && <small className="mute">{tr('뺐습니다')}</small>}

@@ -1,7 +1,8 @@
 import { tr } from '../i18n'
+import type { AirportChoice } from './flightList'
 import { knownCurrency } from '../data/currencies'
 import type { Expense, Flight, Place, Stay, Trip } from '../types'
-import { loadWorldAirports } from '../data/airports'
+import { airlineOf, loadWorldAirports } from '../data/airports'
 import { reverseGeocode, searchPlaces } from './geocode'
 import { legOf } from './legs'
 import { ocrPasses, recognize, recognizeBand, signWords } from './ocr'
@@ -35,6 +36,8 @@ export interface Draft {
   noPlace?: boolean
   /** 같은 이름의 숙소가 여럿이면 고를 수 있는 다른 후보 (예: 시드니의 Quest 호텔들) */
   choices?: StayChoice[]
+  /** 줄임말 공항(KK: 콘깬·끄라비·코타키나발루)의 다른 후보 */
+  airportChoices?: AirportChoice[]
 }
 
 export interface StayChoice { name: string; lat: number; lng: number; address?: string }
@@ -92,7 +95,7 @@ export async function readTripPhoto(file: File, trip: Trip, current: string, onS
       }
     }
   }
-  const out: Draft[] = r.flights.map((f) => ({ date: f.depDate, dateFrom: 'image' as const, flight: f }))
+  const out: Draft[] = r.flights.map((f, i) => ({ date: f.depDate, dateFrom: 'image' as const, flight: f, airportChoices: r.flightChoices?.[i] }))
   if (out.length) {
     // 항공권: 항공편으로 넣고, 금액이 있으면 교통비로 예산에 남긴다 (일정에 장소로는 넣지 않는다)
     const money = r.amount ? toBudget(trip, r.amount, r.currency ?? trip.currency, 0) : null
@@ -262,6 +265,7 @@ export interface Applied {
   stayAdded?: boolean
   /** 같은 이름 숙소 후보 (다른 지점으로 바꿀 수 있게) */
   choices?: StayChoice[]
+  airportChoices?: AirportChoice[]
   checkOut?: string
   /** 이미 넣은 것과 같아 다시 넣지 않았다 */
   duplicate?: boolean
@@ -271,10 +275,12 @@ export interface Applied {
 export function applyDraft(t: Trip, d: Draft, putFlight: (t: Trip, f: Flight) => unknown): Applied {
   const res: Applied = { date: d.date, dateFrom: d.dateFrom, title: d.place?.name ?? d.flight?.flightNo ?? d.expense?.title ?? '', noPlace: d.noPlace }
   if (d.flight) {
-    const same = t.flights.find((f) => f.flightNo === d.flight!.flightNo && f.depDate === d.flight!.depDate)
+    const same = t.flights.find((f) => f.flightNo === d.flight!.flightNo && f.depDate === d.flight!.depDate && f.depTime === d.flight!.depTime)
     if (same) res.duplicate = true
-    else { putFlight(t, d.flight); res.flightId = d.flight.id }
+    else { putFlight(t, d.flight); res.flightId = d.flight.id; res.airportChoices = d.airportChoices }
     res.time = d.flight.depTime
+    // 편명이 없으면 항공사 이름과 구간으로 보여 준다: '스쿠트 SIN → BKK'
+    res.title = `${/\d/.test(d.flight.flightNo) ? d.flight.flightNo : airlineOf(d.flight.flightNo) || d.flight.flightNo} ${d.flight.from} → ${d.flight.to}`
   }
   if (d.stay) {
     const same = (t.stays ?? []).find((s) => s.name === d.stay!.name && s.checkIn === d.stay!.checkIn)
@@ -335,6 +341,12 @@ export function undoApplied(t: Trip, a: Applied) {
 export const dateFromLabel = (from: DateFrom) => (from === 'image' ? tr('사진 속 날짜') : from === 'photo' ? tr('찍은 날짜') : tr('보고 있던 날'))
 
 /** 숙소를 다른 후보(같은 이름의 다른 지점)로 바꾼다 */
+/** 줄임말 공항을 다른 후보로 바꾼다 (같은 사진의 같은 줄임말은 함께) */
+export function switchAirport(t: Trip, flightId: string, side: 'from' | 'to', code: string) {
+  const f = t.flights.find((x) => x.id === flightId)
+  if (f) f[side] = code
+}
+
 export function switchStay(t: Trip, stayId: string, c: StayChoice) {
   const s = t.stays?.find((x) => x.id === stayId)
   if (!s) return

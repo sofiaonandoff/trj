@@ -637,4 +637,5 @@ export const EN: Record<string, string> = {
   "번역 중": "Translating",
   "홈 화면 위젯을 쓰려면 앱 서버에 보기 저장소(Cloudflare KV, TRJ_VIEWS)를 연결해야 합니다": "To use the home screen widget, connect view storage (Cloudflare KV, TRJ_VIEWS) to the app server",
   "오늘의 여정이 아직 없습니다": "Nothing planned for today yet",
+  "'{0}'가 어느 공항인지 확인하세요 (비행시간으로 골랐습니다)": "Check which airport '{0}' is (picked by flight time)",
 }
