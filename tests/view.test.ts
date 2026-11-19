@@ -23,5 +23,11 @@ check('끄면 링크가 더 열리지 않는다', (await handleView('GET', id, n
 check('저장소가 없으면 503', (await handleView('GET', id, null, null, undefined)).status === 503)
 check('이상한 id는 404', (await handleView('GET', '../x', null, null, store)).status === 404)
 
+// 별칭: 예전에 보낸 Drive 보기 링크로도 짧은 링크의 최신 내용을 본다
+const al = (await handleView('POST', '', { data: trip, alias: '1AbCdEfGhIjKlMnOp' }, null, store)).json as { id: string; token: string }
+await handleView('POST', '', { id: al.id, token: al.token, data: { ...trip, title: '바뀐 제목' }, alias: '1AbCdEfGhIjKlMnOp' }, null, store)
+const byAlias = await handleView('GET', 'a/1AbCdEfGhIjKlMnOp', null, null, store)
+check('Drive 파일 id(별칭)로 최신 내용', byAlias.status === 200 && (byAlias.json as { data: { title: string } }).data.title === '바뀐 제목', byAlias)
+check('모르는 별칭은 404', (await handleView('GET', 'a/zzzzzzzzzzzzzz', null, null, store)).status === 404)
 console.log(fails ? `\n${fails}개 실패` : '\n모두 통과')
 process.exit(fails ? 1 : 0)

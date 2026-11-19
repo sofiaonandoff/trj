@@ -39,7 +39,7 @@ function localApi(env: PlanEnv): Plugin {
     req.on('end', async () => {
       let body: unknown = null
       try { body = raw ? JSON.parse(raw) : null } catch { /* 400 */ }
-      const id = (req.url ?? '').replace(/^\/+/, '').split(/[/?]/)[0]
+      const id = (req.url ?? '').replace(/^\/+/, '').split('?')[0]
       const r = await handleView(req.method ?? 'GET', id, body, req.headers['x-view-token'] ?? null, views)
       res.statusCode = r.status
       res.setHeader('Content-Type', 'application/json')

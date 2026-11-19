@@ -60,7 +60,7 @@ function content(t: Trip) {
     meta: META.map((k) => s[k]), days: s.days.map((d) => [d.date, d.items]),
     flights: byId(s.flights), stays: byId(s.stays ?? []), members: byId(s.members), expenses: byId(s.expenses), checklist: byId(s.checklist),
     journal: Object.entries(s.journal).filter(([, v]) => v.text || v.photos.length).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => [k, v.text, v.photos]),
-    tx: Object.entries(s.tx ?? {}).sort(([a], [b]) => a.localeCompare(b)),
+    tx: Object.entries(s.tx ?? {}).sort(([a], [b]) => a.localeCompare(b)), txv: s.txv,
   })
 }
 export const sameContent = (a: Trip, b: Trip) => content(a) === content(b)
@@ -132,10 +132,13 @@ export function mergeTrips(local: Trip, remote: Trip): Trip {
   }
   out.journal = journal
   // 번역: 두 쪽의 것을 합친다 (같은 글의 번역이라 어느 쪽이든 쓸 수 있다)
+  // 판이 다르면 새 판의 번역만 쓴다
   if (local.tx || remote.tx) {
-    const tx: NonNullable<Trip['tx']> = { ...(remote.tx ?? {}) }
-    for (const [k, v] of Object.entries(local.tx ?? {})) tx[k] = { ...tx[k], ...v }
+    const v = Math.max(local.txv ?? 0, remote.txv ?? 0)
+    const tx: NonNullable<Trip['tx']> = { ...((remote.txv ?? 0) === v ? remote.tx ?? {} : {}) }
+    for (const [k, x] of Object.entries((local.txv ?? 0) === v ? local.tx ?? {} : {})) tx[k] = { ...tx[k], ...x }
     out.tx = tx
+    out.txv = v || undefined
   }
   out.updatedAt = Math.max(local.updatedAt ?? local.createdAt, remote.updatedAt ?? remote.createdAt)
   return out

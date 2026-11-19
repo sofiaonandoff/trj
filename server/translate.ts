@@ -2,7 +2,7 @@ import { handlePlan, type PlanEnv } from './plan'
 
 /**
  * 짧은 글 번역 (/api/translate). 함께 쓰는 여행의 장소 이름·메모·지출·준비물을 한국어 ↔ 영어로.
- * Cloudflare Workers AI의 번역 모델(m2m100)을 먼저 쓰고 (1초 안팎, 무료 사용량이 넉넉함),
+ * Cloudflare Workers AI(Gemma 3)를 먼저 쓰고,
  * 바인딩이 없거나 실패한 글만 Gemini로 옮긴다.
  */
 export interface TranslateEnv extends PlanEnv {
@@ -11,8 +11,30 @@ export interface TranslateEnv extends PlanEnv {
 }
 export interface TranslateResult { status: number; json: unknown }
 
-const MODEL = '@cf/meta/m2m100-1.2b'
+/*
+ * 번역 모델: Gemma 3 12B (140개 넘는 언어, 한국어 품질이 좋다).
+ * 처음 쓴 m2m100은 한국어를 엉뚱하게 옮겨('물개 관람 카약 투어' → 'Toughened Laminated Safety Glass') 쓰지 않는다.
+ */
+const MODEL = '@cf/google/gemma-3-12b-it'
 const str = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '')
+
+async function withLlm(ai: NonNullable<TranslateEnv['AI']>, texts: string[], target: 'en' | 'ko'): Promise<(string | null)[]> {
+  const language = target === 'en' ? 'English' : 'Korean'
+  const prompt = [
+    `Translate each item of the JSON array into natural ${language}. The items come from a shared travel itinerary: place names, tour titles, notes, expense names and packing items.`,
+    target === 'ko' ? 'For place names use the common Korean name or a natural Hangul transliteration.' : 'For place names use the common English name or a standard romanization.',
+    'Keep numbers, dates, times, prices, booking codes, flight numbers, URLs and emoji exactly as they are. If an item is already in that language, return it unchanged.',
+    `Answer with only a JSON array of exactly ${texts.length} strings, in the same order. No explanation.`,
+    JSON.stringify(texts),
+  ].join('\n')
+  const r = (await ai.run(MODEL, { messages: [{ role: 'user', content: prompt }], max_tokens: 2048, temperature: 0.1 })) as { response?: unknown }
+  const raw = typeof r?.response === 'string' ? r.response : JSON.stringify(r?.response ?? '')
+  const m = raw.match(/\[[\s\S]*\]/)
+  if (!m) return texts.map(() => null)
+  const arr = JSON.parse(m[0]) as unknown[]
+  if (!Array.isArray(arr) || arr.length !== texts.length) return texts.map(() => null)
+  return arr.map((x) => (typeof x === 'string' && x.trim() ? x.trim() : null))
+}
 
 export async function handleTranslate(body: unknown, env: TranslateEnv): Promise<TranslateResult> {
   const b = (body ?? {}) as Record<string, unknown>
@@ -24,18 +46,14 @@ export async function handleTranslate(body: unknown, env: TranslateEnv): Promise
   let engine = 'gemini'
   if (env.AI) {
     engine = 'workers-ai'
-    // 한 번에 8개씩 나눠 보낸다
-    for (let i = 0; i < texts.length; i += 8) {
-      await Promise.all(texts.slice(i, i + 8).map(async (text, j) => {
-        const source = /[가-힣]/.test(text) ? 'ko' : 'en'
-        if (source === target) { out[i + j] = text; return }
-        try {
-          const r = (await env.AI!.run(MODEL, { text, source_lang: source, target_lang: target })) as { translated_text?: string }
-          const t = r?.translated_text?.trim()
-          // 잘못된 입력이면 'ERROR: …'를 돌려준다
-          if (t && !/^ERROR/.test(t)) out[i + j] = t
-        } catch { /* 아래에서 Gemini로 */ }
-      }))
+    // 이미 그 언어인 글은 그대로 두고, 나머지를 20개씩 묶어 한 번에 묻는다
+    const ask = texts.map((t, i) => ((/[가-힣]/.test(t) ? 'ko' : 'en') === target ? (out[i] = t, -1) : i)).filter((i) => i >= 0)
+    for (let i = 0; i < ask.length; i += 20) {
+      const part = ask.slice(i, i + 20)
+      try {
+        const got = await withLlm(env.AI, part.map((k) => texts[k]), target)
+        part.forEach((k, j) => { if (got[j]) out[k] = got[j] })
+      } catch { /* 아래에서 Gemini로 */ }
     }
   }
   // Workers AI가 없거나 옮기지 못한 글은 Gemini로

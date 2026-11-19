@@ -7,7 +7,7 @@ const json = (status: number, body: unknown) => new Response(JSON.stringify(body
  * Pages 프로젝트 설정 → Bindings에 KV 네임스페이스를 TRJ_VIEWS 이름으로 연결해야 동작한다.
  */
 export const onRequest = async ({ request, env, params }: { request: Request; env: { TRJ_VIEWS?: ViewStore }; params: { path?: string[] } }) => {
-  const id = (params.path ?? [])[0] ?? ''
+  const id = (params.path ?? []).join('/')
   if (request.method !== 'GET') {
     // 고치기·지우기는 이 앱에서 온 요청만 받는다
     const origin = request.headers.get('Origin')

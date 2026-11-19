@@ -150,6 +150,8 @@ export interface Trip {
    * 함께 쓰는 사람을 위한 번역: 원래 글 → { en, ko }. 글을 쓴 기기가 만들어 넣어, 다른 사람은 기다리지 않고 자기 언어로 본다
    */
   tx?: Record<string, { en?: string; ko?: string }>
+  /** 번역을 만든 방식의 판. 판이 바뀌면 예전 번역은 버리고 다시 만든다 */
+  txv?: number
   budget: number // 원
   createdAt: number
   /** 여행 내용이 마지막으로 바뀐 시각 */

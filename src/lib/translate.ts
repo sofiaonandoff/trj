@@ -14,10 +14,13 @@ import { savedViewLink } from './viewLink'
  *  3. 브라우저의 기기 안 번역 (크롬의 Translator API, 인터넷 없이 즉시)
  *  4. 앱 서버 /api/translate (Cloudflare Workers AI, 없으면 Gemini)
  */
-const KEY = 'trj-translations-v1'
+/** 번역 방식의 판 (Workers AI Gemma 3). 판이 바뀌면 이 기기와 여행 파일의 예전 번역을 버린다 */
+export const TXV = 2
+const KEY = `trj-translations-v${TXV}`
 const OFF = 'trj-translate-off'
 const MAX = 3000
 
+try { localStorage.removeItem('trj-translations-v1') } catch { /* 예전 번역(품질이 나쁜 판)은 버린다 */ }
 let cache: Record<string, string> = (() => { try { return JSON.parse(localStorage.getItem(KEY) ?? '{}') } catch { return {} } })()
 let version = 0
 const listeners = new Set<() => void>()
@@ -51,7 +54,7 @@ let tripTx = new Map<string, { en?: string; ko?: string }>()
 const extra = new Map<string, Trip['tx']>()
 function rebuild() {
   const m = new Map<string, { en?: string; ko?: string }>()
-  for (const t of [...useStore.getState().trips.map((x) => x.tx), ...extra.values()]) for (const [k, v] of Object.entries(t ?? {})) m.set(k, { ...m.get(k), ...v })
+  for (const t of [...useStore.getState().trips.filter((x) => x.txv === TXV).map((x) => x.tx), ...extra.values()]) for (const [k, v] of Object.entries(t ?? {})) m.set(k, { ...m.get(k), ...v })
   tripTx = m
   emit()
 }
@@ -63,7 +66,8 @@ rebuild()
 /** 보기 링크처럼 이 기기에 저장되지 않은 여행의 번역도 쓴다 */
 export function useTripTranslations(trip: Trip | null | undefined) {
   const id = trip?.id
-  if (id && extra.get(id) !== trip!.tx) { extra.set(id, trip!.tx); queueMicrotask(rebuild) }
+  const txs = trip?.txv === TXV ? trip.tx : undefined
+  if (id && extra.get(id) !== txs) { extra.set(id, txs); queueMicrotask(rebuild) }
 }
 
 /* ── 기기 안 번역 (크롬 Translator API) ── */
@@ -193,24 +197,25 @@ export function initTripTranslations() {
         const shared = Boolean(trip.drive?.role || savedViewLink(trip.id))
         if (!shared) continue
         const texts = tripTexts(trip)
-        const tx = trip.tx ?? {}
+        const tx = trip.txv === TXV ? trip.tx ?? {} : {}
         const want: Record<Lang, string[]> = { en: [], ko: [] }
         for (const s of texts) for (const to of ['en', 'ko'] as Lang[]) if (needsFor(s, to) && !tx[s]?.[to]) want[to].push(s)
         const stale = Object.keys(tx).filter((k) => !texts.includes(k))
-        if (!want.en.length && !want.ko.length && !stale.length) continue
+        if (!want.en.length && !want.ko.length && !stale.length && trip.txv === TXV) continue
         const got: Record<string, { en?: string; ko?: string }> = {}
         for (const to of ['en', 'ko'] as Lang[]) {
           if (!want[to].length) continue
           const res = await translateTexts(want[to].slice(0, 80), to)
           want[to].slice(0, 80).forEach((s, i) => { if (res[i] && res[i] !== s) got[s] = { ...got[s], [to]: res[i] } })
         }
-        if (!Object.keys(got).length && !stale.length) continue
+        if (!Object.keys(got).length && !stale.length && trip.txv === TXV) continue
         useStore.getState().mutate(trip.id, (t) => {
           const next: NonNullable<Trip['tx']> = {}
           const keep = new Set(tripTexts(t))
-          for (const [k, v] of Object.entries({ ...(t.tx ?? {}) })) if (keep.has(k)) next[k] = v
+          for (const [k, v] of Object.entries(t.txv === TXV ? t.tx ?? {} : {})) if (keep.has(k)) next[k] = v
           for (const [k, v] of Object.entries(got)) if (keep.has(k)) next[k] = { ...next[k], ...v }
           t.tx = Object.keys(next).length ? next : undefined
+          t.txv = TXV
         })
       }
     } catch (e) {

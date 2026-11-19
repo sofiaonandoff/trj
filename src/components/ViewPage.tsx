@@ -42,7 +42,9 @@ export default function ViewPage({ source }: { source: string }) {
   const load = useCallback(async () => {
     if (snapshot) return
     try {
-      const t = source.startsWith('k/') ? (await fetchShortView(source.slice(2)))?.trip ?? null : await fetchView(source)
+      // Drive 보기 링크도 먼저 앱 서버의 최신 내용(별칭)을 본다. 없으면 Drive 파일
+      const t = source.startsWith('k/') ? (await fetchShortView(source.slice(2)))?.trip ?? null
+        : (await fetchShortView(source, true).catch(() => null))?.trip ?? await fetchView(source)
       setTrip(t); setLoadedAt(Date.now()); setError('')
     } catch (e) { setError((e as Error).message) }
   }, [snapshot, source])
@@ -50,7 +52,7 @@ export default function ViewPage({ source }: { source: string }) {
   useEffect(() => {
     if (snapshot) return
     void load()
-    const id = setInterval(() => { if (document.visibilityState === 'visible') void load() }, 60_000)
+    const id = setInterval(() => { if (document.visibilityState === 'visible') void load() }, 30_000)
     const onShow = () => { if (document.visibilityState === 'visible') void load() }
     document.addEventListener('visibilitychange', onShow)
     return () => { clearInterval(id); document.removeEventListener('visibilitychange', onShow) }

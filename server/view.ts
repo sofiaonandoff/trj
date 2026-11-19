@@ -28,8 +28,18 @@ const valid = (d: unknown) => {
 }
 
 /** method: GET·POST·DELETE, id: /api/view/ 뒤의 값 (POST로 새로 만들 때는 없음) */
-export async function handleView(method: string, id: string, body: unknown, token: string | null, store?: ViewStore): Promise<ViewResult> {
+const ALIAS = /^[A-Za-z0-9_-]{10,100}$/
+
+export async function handleView(method: string, path: string, body: unknown, token: string | null, store?: ViewStore): Promise<ViewResult> {
   if (!store) return { status: 503, json: { error: 'no_store' } }
+  let id = path
+  // a/<별칭>: 예전에 보낸 Google Drive 보기 링크(#/view/<Drive 파일 id>)도 이 짧은 링크의 최신 내용을 보게 한다
+  if (method === 'GET' && path.startsWith('a/')) {
+    const alias = path.slice(2)
+    const to = ALIAS.test(alias) ? await store.get(`a:${alias}`) : null
+    if (!to) return { status: 404, json: { error: 'not_found' } }
+    id = to
+  }
   if (method === 'GET') {
     if (!ID.test(id)) return { status: 404, json: { error: 'not_found' } }
     const raw = await store.get(`v:${id}`)
@@ -38,7 +48,8 @@ export async function handleView(method: string, id: string, body: unknown, toke
     return { status: 200, json: { data: r.data, at: r.at } }
   }
   if (method === 'POST') {
-    const b = body as { data?: unknown; id?: string; token?: string } | null
+    const b = body as { data?: unknown; id?: string; token?: string; alias?: string } | null
+    const alias = b?.alias && ALIAS.test(b.alias) ? b.alias : undefined
     if (!b || !valid(b.data)) return { status: 400, json: { error: 'bad_request' } }
     const text = JSON.stringify(b.data)
     if (text.length > MAX) return { status: 413, json: { error: 'too_large' } }
@@ -50,10 +61,12 @@ export async function handleView(method: string, id: string, body: unknown, toke
       const r = JSON.parse(raw) as Rec
       if (r.h !== await hash(b.token)) return { status: 403, json: { error: 'forbidden' } }
       await store.put(`v:${b.id}`, JSON.stringify({ h: r.h, data: b.data, at: Date.now() }), { expirationTtl: TTL })
+      if (alias) await store.put(`a:${alias}`, b.id, { expirationTtl: TTL })
       return { status: 200, json: { id: b.id } }
     }
     const newId = random(10), newToken = random(32)
     await store.put(`v:${newId}`, JSON.stringify({ h: await hash(newToken), data: b.data, at: Date.now() }), { expirationTtl: TTL })
+    if (alias) await store.put(`a:${alias}`, newId, { expirationTtl: TTL })
     return { status: 200, json: { id: newId, token: newToken } }
   }
   if (method === 'DELETE') {

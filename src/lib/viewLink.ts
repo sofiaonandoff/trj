@@ -30,7 +30,8 @@ export async function createViewLink(t: Trip): Promise<string> {
   const have = read()[t.id]
   if (have) { await pushView(t.id); return have.id }
   const data = JSON.stringify(viewOf(t))
-  const r = await post({ data: JSON.parse(data) })
+  // 예전에 보낸 Drive 보기 링크도 이 링크의 최신 내용을 보도록 별칭으로 묶는다
+  const r = await post({ data: JSON.parse(data), alias: t.drive?.view?.fileId })
   if (!r.ok) throw new Error(tr('보기 링크를 만들지 못했습니다'))
   const { id, token } = await r.json() as { id: string; token: string }
   write({ ...read(), [t.id]: { id, token, sent: data } })
@@ -45,7 +46,7 @@ export async function pushView(tripId: string) {
   if (!v || !t) return
   const data = JSON.stringify(viewOf(t))
   if (data === v.sent) return
-  const r = await post({ id: v.id, token: v.token, data: JSON.parse(data) })
+  const r = await post({ id: v.id, token: v.token, data: JSON.parse(data), alias: t.drive?.view?.fileId })
   // 서버에서 지워졌으면(만료 등) 이 기기의 기록도 지운다
   if (r.status === 404 || r.status === 403) { const { [tripId]: _gone, ...rest } = read(); write(rest); emit(); return }
   if (r.ok) write({ ...read(), [tripId]: { ...v, sent: data } })
@@ -61,8 +62,9 @@ export async function removeViewLink(tripId: string) {
 }
 
 /** 받는 사람: 로그인 없이 받는다. 없거나 꺼졌으면 null */
-export async function fetchShortView(id: string): Promise<{ trip: Trip; at: number } | null> {
-  const r = await fetch(`/api/view/${encodeURIComponent(id)}`, { cache: 'no-store' })
+export async function fetchShortView(id: string, alias = false): Promise<{ trip: Trip; at: number } | null> {
+  const r = await fetch(`/api/view/${alias ? 'a/' : ''}${encodeURIComponent(id)}`, { cache: 'no-store' })
+  if (r.status === 503) return null
   if (r.status === 404) return null
   if (!r.ok) throw new Error(tr('일정을 받지 못했습니다. 잠시 뒤 다시 열어 보세요'))
   const { data, at } = await r.json() as { data: Trip; at: number }
@@ -75,11 +77,20 @@ const emit = () => listeners.forEach((f) => f())
 export const onViewLinks = (f: () => void) => { listeners.add(f); return () => { listeners.delete(f) } }
 
 let started = false
+const creating = new Set<string>()
 export function initViewSync() {
   if (started) return
   started = true
   let timer: ReturnType<typeof setTimeout> | undefined
-  const flush = () => { for (const id of Object.keys(read())) void pushView(id).catch(() => undefined) }
+  const flush = () => {
+    for (const id of Object.keys(read())) void pushView(id).catch(() => undefined)
+    // Drive 보기 링크만 있는 여행은 짧은 링크를 만들어 둔다: 그 뒤로는 Google 로그인이 끊겨도 보낸 링크가 계속 새로 바뀐다
+    for (const t of useStore.getState().trips) {
+      if (!t.drive?.view || read()[t.id] || t.drive.role === 'editor' || creating.has(t.id)) continue
+      creating.add(t.id)
+      void createViewLink(t).catch(() => undefined).finally(() => creating.delete(t.id))
+    }
+  }
   useStore.subscribe((s, prev) => {
     if (s.trips === prev.trips) return
     clearTimeout(timer)
