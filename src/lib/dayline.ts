@@ -46,9 +46,15 @@ export function dayLine(trip: Trip, date: string): Entry[] {
   const out: Entry[] = []
 
   const morning = morningStay(trip, date)
-  // 아침에 비행기에서 내리는 날(밤새 날아온 날)은 숙소에서 시작하지 않는다
-  const arrivesOvernight = trip.flights.some((f) => f.arrDate === date && f.depDate < date)
-  if (morning && !arrivesOvernight) out.push({ kind: 'stay-start', stay: morning, checkout: morning.checkOut === date })
+  // 밤새 날아와 아침에 내리는 날은 숙소에서 시작하지 않는다.
+  // 단, 그 비행기가 이 숙소가 있는 도시에서 숙박 기간 중에 떠난 경우만이다. 그렇지 않으면(다른 곳에서 떠난 편,
+  // 도착일이 잘못 들어간 편) 사용자가 직접 넣은 숙소를 믿고 체크아웃을 보여 준다
+  const leftOvernight = morning && trip.flights.some((f) => {
+    if (f.arrDate !== date || f.depDate >= date || f.depDate < morning.checkIn) return false
+    const a = airport(f.from)
+    return !a || km(a, morning) <= GROUND_KM
+  })
+  if (morning && !leftOvernight) out.push({ kind: 'stay-start', stay: morning, checkout: morning.checkOut === date })
 
   // 항공편: 그 날 출발하는 편은 출발 시각에, 전날 떠나 그 날 도착하는 편은 도착 시각에
   const flights: Extract<Entry, { kind: 'flight' }>[] = []

@@ -60,5 +60,15 @@ a.stays = [...a.stays!, { id: 'C', name: 'Hotel C', lat: 1, lng: 1, checkIn: '20
 b.stays = b.stays!.filter((s) => s.id !== 'B'); stamp(base, b, 200)
 const m = mergeTrips(a, b)
 check('숙소 병합: 넣은 것은 남고 지운 것은 지워진다', m.stays?.map((s) => s.id).join() === 'A,C', m.stays?.map((s) => s.id))
+// 직접 넣은 1박 숙소: 다음 날 아침 체크아웃이 보인다
+const one = { ...trip, flights: [], stays: [{ id: 'O', name: '1박', lat: 13.74, lng: 100.53, checkIn: '2026-12-03', checkOut: '2026-12-04' }] } as unknown as Trip
+const ko = (d: string) => dayLine(one, d).map((e) => e.kind === 'stay-start' ? `↑${e.stay.id}${e.checkout ? '-out' : ''}` : e.kind === 'stay-end' ? `↓${e.stay.id}${e.checkin ? '-in' : ''}` : e.kind).join(' ')
+check('1박: 첫날 체크인, 다음 날 맨 위 체크아웃', ko('2026-12-03').endsWith('↓O-in') && ko('2026-12-04').startsWith('↑O-out'), [ko('2026-12-03'), ko('2026-12-04')])
+// 다른 곳에서 밤새 날아온 편(또는 도착일이 잘못 들어간 편)이 있어도 직접 넣은 숙소의 체크아웃은 보인다
+const red = { ...one, flights: [{ id: 'r', flightNo: 'KE129', from: 'ICN', to: 'AKL', depDate: '2026-12-03', depTime: '19:00', arrDate: '2026-12-04', arrTime: '10:00' }] } as unknown as Trip
+check('다른 도시에서 떠난 밤 비행기는 체크아웃을 가리지 않는다', dayLine(red, '2026-12-04')[0]?.kind === 'stay-start', dayLine(red, '2026-12-04').map((e) => e.kind))
+// 숙소가 있는 도시에서 밤 비행기로 떠났으면 그 아침은 숙소에서 시작하지 않는다
+const left = { ...one, flights: [{ id: 'l', flightNo: 'TG656', from: 'BKK', to: 'ICN', depDate: '2026-12-03', depTime: '23:30', arrDate: '2026-12-04', arrTime: '07:00' }] } as unknown as Trip
+check('숙소 도시에서 밤 비행기로 떠났으면 체크아웃 없음', dayLine(left, '2026-12-04').every((e) => e.kind !== 'stay-start'), dayLine(left, '2026-12-04').map((e) => e.kind))
 console.log(fail ? `${fail}개 실패` : '모두 통과')
 process.exit(fail ? 1 : 0)
