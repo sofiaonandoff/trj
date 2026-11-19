@@ -141,7 +141,7 @@ export default function PlanTab({ trip }: { trip: Trip }) {
       )}
       {line.length > 0 && day.items.length === 0 && (
         <div className="empty slim">
-          {tr('{0}에서 갈 곳이 아직 없습니다', tx(leg.city))}
+          {tr('오늘의 여정이 아직 없습니다')}
           <div style={{ marginTop: 10 }}>
             <button className="btn btn-ghost" onClick={() => setAdding('ai-auto')}><Sparkles size={16} />{tr('trj assistant에게 추천받기')}</button>
           </div>

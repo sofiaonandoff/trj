@@ -66,7 +66,6 @@ export default function BudgetTab({ trip, readOnly = false }: { trip: Trip; read
     paid: trip.expenses.filter((e) => e.payer === m.id).reduce((s, e) => s + toWon(e), 0),
     count: trip.expenses.filter((e) => e.payer === m.id).length,
     share: trip.expenses.reduce((s, e) => (e.split.includes(m.id) ? s + toWon(e) / e.split.length : s), 0),
-    byCur: Object.entries(trip.expenses.filter((e) => e.payer === m.id).reduce<Record<string, number>>((a, e) => { a[e.currency] = (a[e.currency] ?? 0) + e.amount; return a }, {})),
   }))
   const totalBase = krwToBase(trip, total)
 
@@ -91,9 +90,11 @@ export default function BudgetTab({ trip, readOnly = false }: { trip: Trip; read
             <input type="number" inputMode="decimal" min={0} step="any" value={budgetShown || ''} placeholder={tr('정하지 않음')} onChange={(e) => mutate(trip.id, (t) => setBudget(t, Number(e.target.value) || 0))} /></label>
           <CurrencySelect trip={trip} value={base} label={tr('내 기준 화폐')} onChange={setViewerBase} />
         </div>}
-        {!readOnly && <p className="hint">{tr('기준 화폐는 이 기기에서 나만 보는 설정입니다. 함께 쓰는 동행은 각자 원하는 화폐로 봅니다.')}</p>}
         {trip.budget > 0 && <p className="hint">{over ? tr('예산을 {0} 넘었습니다', M(total - budgetKrw)) : tr('예산이 {0} 남았습니다', M(budgetKrw - total))}</p>}
       </section>
+
+      {/* 쓴 돈 바로 아래에서도 지출을 기록할 수 있게 */}
+      {!readOnly && <div style={{ margin: '12px 20px 0' }}><button className="btn btn-primary btn-block" onClick={() => setEdit('new')}><Plus size={18} />{tr('지출 기록')}</button></div>}
 
       {used.length > 0 && (
         <section className="panel">
@@ -119,18 +120,17 @@ export default function BudgetTab({ trip, readOnly = false }: { trip: Trip; read
               )
             })}
           </div>
-          {!readOnly && <p className="hint">{tr('처음 환율은 어림값입니다. 실제 환전·카드 결제 환율을 직접 넣으면 모든 합계와 정산이 그 환율로 다시 계산됩니다.')}</p>}
         </section>
       )}
 
       {trip.members.length > 1 && total > 0 && (
         <section className="panel">
           <h2>{tr('사람별로 쓴 돈')}</h2>
-          {byPayer.map(({ m, paid, count, share, byCur }) => (
+          {byPayer.map(({ m, paid, count, share }) => (
             <div className="payer" key={m.id}>
               <Avatar m={m} />
               <span className="grow"><b>{m.name}</b>
-                <small>{count ? tr('{0}건 결제', count) : tr('결제 없음')}{byCur.some(([c]) => c !== base) ? ` · ${byCur.map(([c, a]) => `${(Math.round(a * 100) / 100).toLocaleString('ko-KR')} ${unit(c)}`).join(' + ')}` : ''}</small></span>
+                <small>{count ? tr('{0}건 결제', count) : tr('결제 없음')}</small></span>
               <span style={{ textAlign: 'right' }}>
                 <b className="num">{M(paid)}</b>
                 <small>{tr('자기 몫 {0}', M(share))}</small>

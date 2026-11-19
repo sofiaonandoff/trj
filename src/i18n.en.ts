@@ -636,4 +636,5 @@ export const EN: Record<string, string> = {
   "장소·숙소 이름, 메모, 지출, 준비물을 이 기기에서만 옮겨 보여 줍니다. 원래 글은 바뀌지 않고, 고칠 때는 원래 글이 나옵니다. 옮기는 데 AI(Gemini)를 씁니다.": "Place and stay names, notes, expenses and checklist items are translated on this device only. The original text doesn't change, and you edit the original. Translation uses AI (Gemini).",
   "번역 중": "Translating",
   "홈 화면 위젯을 쓰려면 앱 서버에 보기 저장소(Cloudflare KV, TRJ_VIEWS)를 연결해야 합니다": "To use the home screen widget, connect view storage (Cloudflare KV, TRJ_VIEWS) to the app server",
+  "오늘의 여정이 아직 없습니다": "Nothing planned for today yet",
 }
