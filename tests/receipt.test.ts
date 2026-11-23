@@ -1,5 +1,5 @@
 import { despaceCJK } from '../src/lib/ocr'
-import { findCode, findStayDates, findStayInfo, stayTime, findDates, findName, findTime, findTotal, fixBrand, parseAmount, pickTripDate, readText } from '../src/lib/receipt'
+import { findCode, findStayDates, findStayInfo, stayTime, findDates, findName, findTime, findTotal, fixBrand, parseAmount, pickTripDate, readText, fixFlightNos } from '../src/lib/receipt'
 
 import { loadWorldAirports } from '../src/data/airports'
 await loadWorldAirports()
@@ -111,5 +111,10 @@ for (const head of ['총 금액 105,800원                      +16', '= 금액 
 }
 check('연도 없는 날짜는 여행에 가까운 해로: 12월 여행의 2월 12일 → 다음 해', readText(kkcRows('x').map((l) => ({ ...l, text: l.text.replace('20274 ', '') })), ['2026-12-20'], 'THB').flights[0]?.depDate === '2027-02-12')
 check('금액: 통화가 붙은 숫자를 먼저, +16 같은 덧붙임은 빼고', parseAmount('총 금액 105,800원 +16') === 105800 && parseAmount('Total 1,250 +3') === 1250 && parseAmount('합계 22,000원') === 22000)
+// 경유 항공권 (Kiwi 다크 모드): 청주 → 상하이 푸둥 → 방콕, 둘째 편명을 MUB8611로 읽음
+const mu = readText(['1:53 mm                        all T &', '<', 'Bangkok', 'from Cheongju', 'Tuesday, February 9, 2027', '® 8h20m © 1stop', 'China Eastern                                                 «', 'MU5084', 'e 11:30AM Cheongju', '® 2hOm                     More info Vv', 'e 12:30PM Shanghai Pudong', '® 1h 25m connection in airport', 'China Eastern                                             «', 'MUB8611 - Operated by Shanghai Airlines', 'e 1:55PM Shanghai Pudong', '® 4h55m                    More info Vv', 'e 5:50PM Bangkok Suvarnabhumi'].map((text, i) => ({ text, top: i * 40, height: 30 })), ['2027-02-09', '2027-02-10'], 'THB')
+const legs = mu.flights.map((f) => `${f.flightNo} ${f.from}-${f.to} ${f.depDate} ${f.depTime}-${f.arrDate} ${f.arrTime}`).join(' / ')
+check('경유 항공권: 두 구간으로 (MU5084 CJJ→PVG, MU8611 PVG→BKK)', legs === 'MU5084 CJJ-PVG 2027-02-09 11:30-2027-02-09 12:30 / MU8611 PVG-BKK 2027-02-09 13:55-2027-02-09 17:50', legs)
+check('편명에 끼어 읽힌 글자 고치기', fixFlightNos('MUB8611 -') === 'MU8611 -' && fixFlightNos('KEO17') === 'KE017' && fixFlightNos('A320 B787') === 'A320 B787')
 console.log(fail ? `${fail}개 실패` : '모두 통과')
 process.exit(fail ? 1 : 0)

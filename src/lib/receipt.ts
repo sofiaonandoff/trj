@@ -527,6 +527,51 @@ export function fixBrand(name: string): string {
 }
 
 /** 숙소 화면에서 읽은 날짜·시각·주소를 한데 모은다 */
+/**
+ * 경유 항공권: 한 화면에 편명이 둘 이상이면 편명마다 구간을 나눠 읽는다.
+ *   China Eastern / MU5084 / 11:30AM Cheongju / 12:30PM Shanghai Pudong / 1h 25m connection /
+ *   China Eastern / MU8611 · Operated by Shanghai Airlines / 1:55PM Shanghai Pudong / 5:50PM Bangkok Suvarnabhumi
+ * 날짜가 첫 구간 위에만 있으면 모든 구간에 쓰고, 다음 구간이 앞 구간 도착보다 이르면 다음 날로 본다.
+ */
+const DIGIT_LIKE: Record<string, string> = { B: '8', O: '0', o: '0', S: '5', I: '1', l: '1', Z: '2' }
+/** OCR이 편명에 끼워 읽은 글자 고치기: MUB8611 → MU8611, MUB611 → MU8611 */
+export function fixFlightNos(line: string): string {
+  return line.replace(/(?<![A-Za-z0-9])([A-Z]{2}|[A-Z]\d|\d[A-Z])([BOoSIlZ])(\d{2,4})(?![\d:])/g, (all, code: string, x: string, digits: string) => {
+    if (!AIRLINES[code]) return all
+    return digits.length === 4 ? `${code}${digits}` : `${code}${DIGIT_LIKE[x]}${digits}`
+  })
+}
+const FLIGHT_NO = /(?<![A-Za-z0-9-])([A-Z]{2}|[A-Z]\d|\d[A-Z])\s?(\d{2,4})(?![\d:-])/g
+export function connectingFlights(text: string, days: string[]): Flight[] {
+  setDateRef(days)
+  const year = Number((days[0] ?? '').slice(0, 4)) || new Date().getFullYear()
+  // '운항: 상하이항공'은 도시 이름이 아니다
+  const lines = text.split('\n').map((l) => fixFlightNos(l).replace(/\b(operated\s+by|운항\s*[:：]?|공동\s*운항)\b.*$/i, '$1'))
+  const starts: number[] = [], seen: string[] = []
+  lines.forEach((l, i) => {
+    for (const m of l.matchAll(FLIGHT_NO)) {
+      const no = `${m[1]}${m[2]}`
+      if (AIRLINES[m[1]] && !/^[AB]\d{3}/.test(m[0]) && !seen.includes(no)) { seen.push(no); starts.push(i); break }
+    }
+  })
+  if (starts.length < 2) return []
+  const dateText = lines.slice(0, starts[0] + 1).filter((l) => findDates(l, year).length).join('\n')
+  const legs: Flight[] = []
+  starts.forEach((at, k) => {
+    const block = lines.slice(at, starts[k + 1] ?? lines.length).join('\n')
+    const f = flightFromTable(findDates(block, year).length ? block : `${dateText}\n${block}`, days)
+    if (f) legs.push(f)
+  })
+  if (legs.length < 2) return []
+  // 구간을 이어 붙인다: 다음 구간 출발이 앞 구간 도착보다 이르면 하루 뒤
+  for (let i = 1; i < legs.length; i++) {
+    const prev = legs[i - 1], cur = legs[i]
+    if (cur.depDate === prev.depDate && prev.arrDate > prev.depDate) { cur.depDate = prev.arrDate; cur.arrDate = addDays(cur.arrDate, 1) }
+    if (cur.depDate === prev.arrDate && cur.depTime < prev.arrTime) { cur.depDate = addDays(cur.depDate, 1); cur.arrDate = addDays(cur.arrDate, 1) }
+  }
+  return legs
+}
+
 export function stayOf(lines: string[], days: string[]): Reading['stay'] {
   setDateRef(days)
   const d = findStayDates(lines.join('\n'), days)
@@ -619,6 +664,8 @@ export function readText(all: OcrLine[], days: string[], tripCurrency: string): 
   const listed = hotelPage ? [] : flightList(lines.map((l) => l.text), days)
   const flightChoices = listed.map((f) => f.choices)
   let flights: Flight[] = hotelPage ? [] : listed.length ? listed.map(({ choices: _c, ...f }) => f) : parseFlightText(text, year).filter(isComplete)
+  // 경유 항공권: 편명이 둘 이상이면 구간마다
+  if (flights.length < 2 && !hotelPage && !listed.length) { const legs = connectingFlights(lines.filter((l) => !CHROME.test(l.text)).map((l) => l.text).join('\n'), days); if (legs.length >= 2) flights = legs }
   if (!flights.length && !hotelPage) { const t = flightFromTable(lines.filter((l) => !CHROME.test(l.text)).map((l) => l.text).join('\n'), days); if (t) flights = [t] }
   flights = flights.map((f, i) => ({ ...f, id: `ocr${Date.now()}${i}` }))
   // 투어·액티비티 바우처: 숙소(체크아웃 있는) 화면이 아니면, 피자집 안내 같은 낱말보다 먼저 본다
