@@ -133,6 +133,16 @@ export function findStayDates(text: string, days: string[]): Reading['stay'] {
 export const stayLabelLine = (lines: OcrLine[]) => lines.find((l) => IN.test(l.text) && OUT.test(l.text)) ?? lines.find((l) => IN.test(l.text))
 
 /**
+ * 이름 앞에 붙은 사진 찌꺼기 떼기: 숙소 사진 썸네일이 '#4', '8', 'p18' 같은 글자로 읽혀 이름 앞에 붙는다.
+ * 대문자·한글로 시작하는 낱말 앞의 짧은 숫자·기호 덩어리만 뗀다 ('7-Eleven', '1 Hotel'처럼 이름의 일부일 수 있는 건
+ * 뒤 낱말이 하나뿐이면 남긴다)
+ */
+export function stripLeadJunk(name: string): string {
+  const m = name.match(/^((?:(?=\S*[\d#@*%&|\\/])\S{1,4}\s+)+)([\p{Lu}가-힣].*)$/u)
+  return m && m[2].trim().split(/\s+/).length >= 2 ? m[2].trim() : name
+}
+
+/**
  * 숙소 이름·주소·호스트 (에어비앤비 같은 숙소 앱 화면).
  * - 이름: '숙소' 제목 아래의 숙소 소개 제목, 없으면 'OO의 숙소' 제목
  * - 도시: 'Tauranga의 숙소'의 Tauranga (주소로 위치를 찾을 때 함께 쓴다)
@@ -151,7 +161,7 @@ export function findStayInfo(lines: string[]): { name?: string; city?: string; a
       // 사진 옆 글자 찌꺼기를 떼고, 칸이 나뉘어 있으면 가장 긴 글자 칸을 쓴다
       const cols = l.split(/\s{2,}/).map((x) => x.trim()).filter((x) => /\p{L}{2,}/u.test(x))
       const best = cols.sort((a, b) => b.length - a.length)[0] ?? ''
-      return best.replace(/^[^\p{L}\p{N}]+/u, '').replace(/^(?:[a-z]{1,4}\s+)+(?=[\p{Lu}가-힣])/u, '').trim()
+      return stripLeadJunk(best.replace(/^[^\p{L}\p{N}]+/u, '').replace(/^(?:[a-z]{1,4}\s+)+(?=[\p{Lu}가-힣])/u, '').trim())
     }
     // 바로 위 줄만 본다 (문장·항목 이름은 숙소 이름이 아니다)
     const prev = lines[di - 1] ?? ''
@@ -231,7 +241,7 @@ export function findDates(text: string, year: number): string[] {
   for (const m of t.matchAll(/(\d{1,2})\s*월\s*(\d{1,2})\s*일/g)) push(year, +m[1], +m[2], true)
   const month = (w: string) => MONTHS[w.toLowerCase().slice(0, 4)] ?? MONTHS[w.toLowerCase().slice(0, 3)]
   for (const m of t.matchAll(/\b(\d{1,2})(?:st|nd|rd|th)?\s*([A-Za-z]{3,9})\.?,?\s*(\d{4})?/g)) { const mo = month(m[2]); if (mo) push(m[3] ? +m[3] : year, mo, +m[1], !m[3]) }
-  for (const m of t.matchAll(/\b([A-Za-z]{3,9})\.?\s*(\d{1,2})(?:st|nd|rd|th)?\b,?\s*(\d{4})?/g)) { const mo = month(m[1]); if (mo) push(m[3] ? +m[3] : year, mo, +m[2], !m[3]) }
+  for (const m of t.matchAll(/\b([A-Za-z]{3,9})\.?\s*(\d{1,2})(?:st|nd|rd|th)?\b(?!\s*[:.]\s*\d\d),?\s*(\d{4})?/g)) { const mo = month(m[1]); if (mo) push(m[3] ? +m[3] : year, mo, +m[2], !m[3]) }
   for (const m of t.matchAll(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/g)) push(+m[1], +m[2], +m[3])
   // 항공권 표기: 02DEC26, 04DEC
   for (const m of t.matchAll(/\b(\d{2})(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(\d{2})?\b/gi)) push(m[3] ? 2000 + +m[3] : year, MONTHS[m[2].toLowerCase()], +m[1], !m[3])
@@ -690,7 +700,7 @@ export function readText(all: OcrLine[], days: string[], tripCurrency: string): 
   if (kind?.cat === 'stay') { const p = findStayInfo(promo); info.city ??= p.city; info.room ??= p.room }
   // 숙소 이름: 화면에 숙소 이름이 없는 예약 확인 화면(아고다 등)이면 머리말 대신 'Sydney 숙소'처럼 도시로
   const hotelLine = body.map((l) => l.text).find((t) => /hotel|resort|\binn\b|suites?\b|hostel|apartments?\b|호텔|리조트|ホテル/i.test(t) && !/hotels?\s+in\b|book another|호텔\s*더/i.test(t) && t.length <= 48)
-  const stayName = kind?.cat === 'stay' ? info.name ?? hotelLine?.replace(/^[^\p{L}\p{N}]+/u, '').trim() ?? (info.city ? tr('{0} 숙소', info.city) : undefined) : undefined
+  const stayName = kind?.cat === 'stay' ? info.name ?? (hotelLine ? stripLeadJunk(hotelLine.replace(/^[^\p{L}\p{N}]+/u, '').trim()) : undefined) ?? (info.city ? tr('{0} 숙소', info.city) : undefined) : undefined
   const stay = kind?.cat === 'stay' ? stayOf(body.map((l) => l.text), days) : undefined
   const tour = tourPage ? readTour(body.map((l) => l.text)) : undefined
   return {

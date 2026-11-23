@@ -116,5 +116,11 @@ const mu = readText(['1:53 mm                        all T &', '<', 'Bangkok', '
 const legs = mu.flights.map((f) => `${f.flightNo} ${f.from}-${f.to} ${f.depDate} ${f.depTime}-${f.arrDate} ${f.arrTime}`).join(' / ')
 check('경유 항공권: 두 구간으로 (MU5084 CJJ→PVG, MU8611 PVG→BKK)', legs === 'MU5084 CJJ-PVG 2027-02-09 11:30-2027-02-09 12:30 / MU8611 PVG-BKK 2027-02-09 13:55-2027-02-09 17:50', legs)
 check('편명에 끼어 읽힌 글자 고치기', fixFlightNos('MUB8611 -') === 'MU8611 -' && fixFlightNos('KEO17') === 'KE017' && fixFlightNos('A320 B787') === 'A320 B787')
+// 아고다 일정 (2027.2.13–14 Eastin Grand): 'Feb 14:00'을 날짜로 읽지 않고, 썸네일 찌꺼기(#4, 8)를 이름에서 뗀다
+for (const junk of ['p18  #4 ', '8 ']) {
+  const eg = readText(['Bangkok ©', '13-14 Feb 2027 (5 ㆍ @@ 1 booking', 'Itinerary     Bookings     Saved', 'Day 1 - Sat, 13 Feb', '=    @ Confirmed', `${junk}Eastin Grand Hotel Phayathai`, 'BRIE] 13 Feb 14:00 — 14 Feb 12:00', '=  zo Bangkok', '< Directions', '1 Booking + 1 room                                A', 'ID: 1801660379', ':   + 1x SUPERIOR PANORAMA', ')    2 Adults ㆍ11\\/6500', 'View and edit      Contact us       Add ro', 'Day 2 - Sun, 14 Feb', '=    12:00 Check out + Eastin Grand Hotel Phayathai'].map((text, i) => ({ text, top: i * 40, height: 30 })), ['2027-02-13', '2027-02-14'], 'THB')
+  check(`아고다 일정 (${junk.trim()}): Eastin Grand Hotel Phayathai, 2.13 14:00 → 2.14 12:00, Bangkok`, eg.name === 'Eastin Grand Hotel Phayathai' && eg.stay?.checkIn === '2027-02-13' && eg.stay?.checkOut === '2027-02-14' && eg.stay?.inTime === '14:00' && eg.stay?.outTime === '12:00' && eg.stay?.city === 'Bangkok' && eg.code === '1801660379', [eg.name, eg.stay, eg.code])
+}
+check('날짜 뒤 시각은 날짜가 아니다: 13 Feb 14:00 — 14 Feb 12:00', findDates('13 Feb 14:00 — 14 Feb 12:00', 2027).join() === '2027-02-13,2027-02-14', findDates('13 Feb 14:00 — 14 Feb 12:00', 2027))
 console.log(fail ? `${fail}개 실패` : '모두 통과')
 process.exit(fail ? 1 : 0)
