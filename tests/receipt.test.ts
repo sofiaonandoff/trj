@@ -103,5 +103,13 @@ check('아고다: 아래 항공권 광고는 항공편·금액이 아니다', ag
 const ag2 = readText(['8:37 \\                             EH', '« Safari                                      20680 | | | 1', 'Sydney ©', '13-14 Dec 2026 (5 ㆍ @@ 1 booking', 'Itinerary                         Saved', 'Day 1 ㆍ Sun, 13 Dec', '=    @ Confirmed', 'sith  Quest North Sydney', 'ama fl 13 Dec 14:00 - 14 Dec', '고    fi Sydney', '< Directions', '1 Booking + 1 room                                A', 'ID: 1784314613', '[J   A  1 x Studio Superior', '도일 2 Adults ㆍ11\\/6500', 'Contact us      Add rooms'].map((text, i) => ({ text, top: i * 40, height: 30 })), nzDays, 'AUD')
 check('아고다 일정 카드: Quest North Sydney, 12.13 14:00 → 12.14', ag2.name === 'Quest North Sydney' && ag2.stay?.checkIn === '2026-12-13' && ag2.stay?.checkOut === '2026-12-14' && ag2.stay?.inTime === '14:00' && ag2.stay?.city === 'Sydney', [ag2.name, ag2.stay])
 check('아고다 일정 카드: 예약번호, 엉뚱한 금액 없음', ag2.code === '1784314613' && ag2.amount === undefined, [ag2.code, ag2.amount])
+// 트립닷컴 항공권 (2027.2.12 콘깬 → 돈므앙): '년'을 4로, '총'을 =로 읽고, 적립 포인트 +16이 같은 줄에 붙는다
+const kkcRows = (head: string) => [head, '변경 및 취소 규정', '> 20274 2월 12일. 1시간                   A', '모든 시간은 현지 시간으로 표시됩니다', '12:15    KKC 21 공항 +1', '@ 타이 에어아시아 FD3249 일반석               N', '에어버스 A320(ZE) | W 위탁 수하물 허용량 불포함', '13:15     DMK 돈므앙 국제공항 12'].map((text, i) => ({ text, top: i * 40, height: 30 }))
+for (const head of ['총 금액 105,800원                      +16', '= 금액 105,800원                      +16']) {
+  const k = readText(kkcRows(head), ['2026-12-07', '2026-12-08', '2026-12-09'], 'THB')
+  check(`트립닷컴 항공권 (${head.slice(0, 6)}): FD3249 KKC→DMK 2027-02-12 12:15–13:15, 105,800원`, k.flights[0]?.flightNo === 'FD3249' && k.flights[0].from === 'KKC' && k.flights[0].to === 'DMK' && k.flights[0].depDate === '2027-02-12' && k.flights[0].arrDate === '2027-02-12' && k.flights[0].depTime === '12:15' && k.flights[0].arrTime === '13:15' && k.amount === 105800 && k.currency === 'KRW', [k.flights, k.amount, k.currency])
+}
+check('연도 없는 날짜는 여행에 가까운 해로: 12월 여행의 2월 12일 → 다음 해', readText(kkcRows('x').map((l) => ({ ...l, text: l.text.replace('20274 ', '') })), ['2026-12-20'], 'THB').flights[0]?.depDate === '2027-02-12')
+check('금액: 통화가 붙은 숫자를 먼저, +16 같은 덧붙임은 빼고', parseAmount('총 금액 105,800원 +16') === 105800 && parseAmount('Total 1,250 +3') === 1250 && parseAmount('합계 22,000원') === 22000)
 console.log(fail ? `${fail}개 실패` : '모두 통과')
 process.exit(fail ? 1 : 0)

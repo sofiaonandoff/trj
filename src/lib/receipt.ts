@@ -71,6 +71,7 @@ export function stayTime(s: string, checkin: boolean): string | undefined {
 
 /** 숙소 예약의 체크인·체크아웃 날짜와 시각 */
 export function findStayDates(text: string, days: string[]): Reading['stay'] {
+  setDateRef(days)
   const year = Number((days[0] ?? '').slice(0, 4)) || new Date().getFullYear()
   const lines = text.split('\n')
 
@@ -195,28 +196,45 @@ const valid = (y: number, m: number, d: number) => m >= 1 && m <= 12 && d >= 1 &
 const iso = (y: number, m: number, d: number) => `${y}-${pad(m)}-${pad(d)}`
 
 /** 글자 속 날짜 후보를 모두 찾는다. 태국 불기(2569 → 2026)와 연도 없는 날짜도 받는다 */
+/**
+ * 연도 없이 '2월 12일'만 적힌 날짜의 연도를 고를 기준 (여행 첫날).
+ * 12월에 시작하는 여행의 '2월 12일'은 다음 해다. readText·flightFromTable이 여행 날짜로 정한다.
+ */
+let refDate: string | undefined
+export const setDateRef = (days: string[]) => { refDate = days[0] }
+const yearFor = (year: number, m: number, d: number) => {
+  if (!refDate || !valid(year, m, d)) return year
+  const ref = Date.parse(refDate)
+  // 여행 첫날에서 가장 가까운 해 (앞뒤 한 해까지)
+  return [year - 1, year, year + 1].filter((y) => valid(y, m, d)).sort((a, b) => Math.abs(Date.parse(iso(a, m, d)) - ref) - Math.abs(Date.parse(iso(b, m, d)) - ref))[0] ?? year
+}
+
 export function findDates(text: string, year: number): string[] {
   const out: string[] = []
-  const push = (y: number, m: number, d: number) => {
+  const push = (y: number, m: number, d: number, guessed = false) => {
+    if (guessed) y = yearFor(y, m, d)
     if (y > 2400 && y < 2700) y -= 543
     if (y < 100) y += 2000
-    // OCR이 연도 한 자리를 잘못 읽은 경우(2226, 2O26 → 2026): 여행 연도와 한 자리만 다르면 고친다
-    if (y !== year && [...String(y)].filter((c, i) => c !== String(year)[i]).length === 1 && String(y).length === 4) y = year
+    // OCR이 연도 한 자리를 잘못 읽은 경우(2226, 2O26 → 2026): 여행 연도와 한 자리만 다르면 고친다.
+    // 바로 앞뒤 해(2026 ↔ 2027)는 해를 넘기는 여행일 수 있어 그대로 둔다
+    if (y !== year && Math.abs(y - year) > 1 && [...String(y)].filter((c, i) => c !== String(year)[i]).length === 1 && String(y).length === 4) y = year
     if (valid(y, m, d)) out.push(iso(y, m, d))
   }
   const t = text.replace(/\s+/g, ' ')
   for (const m of t.matchAll(/(\d{4})\s*[-./년]\s*(\d{1,2})\s*[-./월]\s*(\d{1,2})/g)) push(+m[1], +m[2], +m[3])
+  // '2027년 2월 12일'의 '년'을 4·L로 읽은 것: 20274 2월 12일, 2027L 2월 12일
+  for (const m of t.matchAll(/(?<!\d)(20\d{2})(?:4|[Ll'’|])\s*(\d{1,2})\s*월\s*(\d{1,2})\s*일/g)) push(+m[1], +m[2], +m[3])
   for (const m of t.matchAll(/(?<![\d.])(\d{1,2})[./-](\d{1,2})[./-](\d{4}|\d{2})(?![\d])/g)) {
     // 일/월/년이 흔하지만 월/일/년일 수도 있다: 둘 다 후보로 둔다
     push(+m[3], +m[2], +m[1]); push(+m[3], +m[1], +m[2])
   }
-  for (const m of t.matchAll(/(\d{1,2})\s*월\s*(\d{1,2})\s*일/g)) push(year, +m[1], +m[2])
+  for (const m of t.matchAll(/(\d{1,2})\s*월\s*(\d{1,2})\s*일/g)) push(year, +m[1], +m[2], true)
   const month = (w: string) => MONTHS[w.toLowerCase().slice(0, 4)] ?? MONTHS[w.toLowerCase().slice(0, 3)]
-  for (const m of t.matchAll(/\b(\d{1,2})(?:st|nd|rd|th)?\s*([A-Za-z]{3,9})\.?,?\s*(\d{4})?/g)) { const mo = month(m[2]); if (mo) push(m[3] ? +m[3] : year, mo, +m[1]) }
-  for (const m of t.matchAll(/\b([A-Za-z]{3,9})\.?\s*(\d{1,2})(?:st|nd|rd|th)?\b,?\s*(\d{4})?/g)) { const mo = month(m[1]); if (mo) push(m[3] ? +m[3] : year, mo, +m[2]) }
+  for (const m of t.matchAll(/\b(\d{1,2})(?:st|nd|rd|th)?\s*([A-Za-z]{3,9})\.?,?\s*(\d{4})?/g)) { const mo = month(m[2]); if (mo) push(m[3] ? +m[3] : year, mo, +m[1], !m[3]) }
+  for (const m of t.matchAll(/\b([A-Za-z]{3,9})\.?\s*(\d{1,2})(?:st|nd|rd|th)?\b,?\s*(\d{4})?/g)) { const mo = month(m[1]); if (mo) push(m[3] ? +m[3] : year, mo, +m[2], !m[3]) }
   for (const m of t.matchAll(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/g)) push(+m[1], +m[2], +m[3])
   // 항공권 표기: 02DEC26, 04DEC
-  for (const m of t.matchAll(/\b(\d{2})(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(\d{2})?\b/gi)) push(m[3] ? 2000 + +m[3] : year, MONTHS[m[2].toLowerCase()], +m[1])
+  for (const m of t.matchAll(/\b(\d{2})(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(\d{2})?\b/gi)) push(m[3] ? 2000 + +m[3] : year, MONTHS[m[2].toLowerCase()], +m[1], !m[3])
   return [...new Set(out)]
 }
 
@@ -262,6 +280,7 @@ const DATE_LABEL = /체크\s*인|check[\s-]*in|이용\s*일|방문\s*일|관람\
 const NOT_DATE_LABEL = /체크\s*아웃|check[\s-]*out|예약\s*일|결제\s*일|booked\s*on|booking\s*date|발행|issued|만료|expir/i
 
 export function pickTripDate(text: string, days: string[]): string | undefined {
+  setDateRef(days)
   const year = Number((days[0] ?? '').slice(0, 4)) || new Date().getFullYear()
   const lines = text.split('\n')
   // 체크인·이용일처럼 '그 날'을 가리키는 줄의 날짜를 먼저 본다. 체크아웃·예약일 줄은 뒤로 미룬다
@@ -301,7 +320,16 @@ export function findCurrency(text: string, fallback: string): string {
 }
 
 /** "1,234.50", "1.234,50", "12 600" 같은 금액을 숫자로 */
+const CUR_AFTER = /(\d{1,3}(?:[ ,.]\d{3})+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?)\s*(?:원|₩|円|บาท|THB|KRW|JPY|USD|EUR|AUD|NZD)/i
+const CUR_BEFORE = /(?:[฿₩¥€£₫$\\]|THB|KRW|JPY|USD|EUR|AUD|NZD)\s*(\d{1,3}(?:[ ,.]\d{3})+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?)/i
 export function parseAmount(s: string): number | undefined {
+  // 통화가 붙은 금액이 있으면 그것 ('총 금액 105,800원 +16'의 적립 포인트 +16을 피한다)
+  const c = s.match(CUR_AFTER) ?? s.match(CUR_BEFORE)
+  if (c) { const n = parsePlain(c[1]); if (n !== undefined) return n }
+  // '+16', '+1' 같은 덧붙임 숫자(적립·다음 날 표시)는 금액이 아니다
+  return parsePlain(s.replace(/\+\s*\d{1,3}(?![\d,.])/g, ' '))
+}
+function parsePlain(s: string): number | undefined {
   // 숫자 사이에 끼어 읽힌 O·o·l·I는 0·1로 본다 (1O0.00 → 100.00)
   // 바트 기호(฿)가 "[4", "(8"처럼 괄호+숫자로 읽힌 경우: 그 숫자는 기호로 본다
   s = s.replace(/[[(|{]\s*[48B](?=\d)/g, ' ')
@@ -318,7 +346,7 @@ export function parseAmount(s: string): number | undefined {
   return Number.isFinite(n) && n > 0 ? n : undefined
 }
 
-const TOTAL = /grand\s*total|t[o0]ta[l1i]|^\s*총\b|결제\s*완료|payment\s*complete|\bpaid\b|카드\s*결제|신용\s*카드|paid\s*by|card\s*payment|amount\s*(due|paid)?|balance|합\s*계|총\s*(액|금액|결제)|결제\s*금액|받을\s*금액|청구\s*금액|合\s*計|お会計|ご請求|総額|รวม(ทั้งสิ้น|เงิน)?|ยอดรวม|ยอดสุทธิ|tổng|montant|summe|totale/i
+const TOTAL = /^[^\p{L}\d]*금\s*액|grand\s*total|t[o0]ta[l1i]|^\s*총\b|결제\s*완료|payment\s*complete|\bpaid\b|카드\s*결제|신용\s*카드|paid\s*by|card\s*payment|amount\s*(due|paid)?|balance|합\s*계|총\s*(액|금액|결제)|결제\s*금액|받을\s*금액|청구\s*금액|合\s*計|お会計|ご請求|総額|รวม(ทั้งสิ้น|เงิน)?|ยอดรวม|ยอดสุทธิ|tổng|montant|summe|totale/iu
 const NOT_TOTAL = /sub\s*total|소계|vat|tax|세액|부가세|change|거스름|잔돈|お釣|ทอน|discount|할인|cash\s*tendered|받은\s*금액/i
 
 /** 합계 줄의 금액을 찾는다. 없으면 통화 기호가 붙은 가장 큰 금액 */
@@ -372,6 +400,7 @@ export function findName(lines: OcrLine[]): string | undefined {
 const NOT_CITY = new Set(['date', 'status', 'economy', 'business', 'terminal', 'confirmed', 'flight', 'operated', 'departing', 'arriving', 'non-stop', 'aircraft', 'sale', 'class', 'premium', 'first', 'seat', 'gate', 'time', 'est', 'journey', 'total', 'amount', 'card', 'master', 'reference', 'issued'])
 
 export function flightFromTable(text: string, days: string[]): Flight | null {
+  setDateRef(days)
   const year = Number((days[0] ?? '').slice(0, 4)) || new Date().getFullYear()
   const lines = text.split('\n')
   const codes = new Set(AIRPORTS.map((a) => a.code))
@@ -499,6 +528,7 @@ export function fixBrand(name: string): string {
 
 /** 숙소 화면에서 읽은 날짜·시각·주소를 한데 모은다 */
 export function stayOf(lines: string[], days: string[]): Reading['stay'] {
+  setDateRef(days)
   const d = findStayDates(lines.join('\n'), days)
   const info = findStayInfo(lines)
   if (!d && !info.address) return undefined
@@ -575,6 +605,7 @@ export function readTour(lines: string[]): { name?: string; code?: string; info:
 const PROMO = /book another|more hotels|flight to\s|you might also|recommended for you|similar (?:hotels|properties)|함께 (?:예약|보면)|다른 숙소|추천 (?:숙소|항공)|항공권 할인|최대\s*\d+%\s*할인|up to \d+% off/i
 
 export function readText(all: OcrLine[], days: string[], tripCurrency: string): Reading {
+  setDateRef(days)
   // 예약 확인 화면 아래의 광고·추천(다른 객실·숙소 예약, 항공권 할인)은 내 예약이 아니다: 거기부터 잘라 낸다.
   // 다만 'More Hotels in Sydney'처럼 도시 이름은 거기서도 얻는다
   const promoAt = all.findIndex((l) => PROMO.test(l.text))
