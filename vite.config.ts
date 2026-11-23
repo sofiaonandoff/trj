@@ -8,6 +8,7 @@ const version = (process.env.CF_PAGES_COMMIT_SHA ?? (() => { try { return execSy
 import { handlePlan, type PlanEnv } from './server/plan'
 import { handleView, memoryStore } from './server/view'
 import { handleTranslate } from './server/translate'
+import { handleWidget } from './server/widget'
 
 /**
  * 로컬(npm run dev / preview)에서도 /api/plan이 동작하게 한다.
@@ -60,8 +61,16 @@ function localApi(env: PlanEnv): Plugin {
       res.end(JSON.stringify(r.json))
     })
   }
+  const widgetHandler = async (req: { url?: string }, res: Res) => {
+    const u = new URL(req.url ?? '/', 'http://x')
+    const r = await handleWidget(u.pathname.replace(/^\/+/, ''), u.searchParams, views)
+    res.statusCode = r.status
+    res.setHeader('Content-Type', r.type)
+    res.end(r.body)
+  }
   const use = (server: { middlewares: { use: (p: string, h: never) => void } }) => {
     server.middlewares.use('/api/plan', handler as never); server.middlewares.use('/api/view', viewHandler as never); server.middlewares.use('/api/translate', translateHandler as never)
+    server.middlewares.use('/api/widget', widgetHandler as never)
   }
   return {
     name: 'trj-local-api',

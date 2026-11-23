@@ -183,7 +183,7 @@ function ViewLink({ trip }: { trip: Trip }) {
           {(saved || owner) && <button className="btn btn-quiet" disabled={busy} onClick={stop}>{tr('끄기')}</button>}
         </div>
       ) : <button className="btn btn-primary btn-block" disabled={busy} onClick={make}><Eye size={18} />{tr('보기 링크 만들기')}</button>}
-      {url && <button className="btn btn-quiet btn-block" style={{ marginTop: 8 }} disabled={busy} onClick={openWidget}><Smartphone size={16} />{tr('아이폰 홈 화면 위젯 만들기')}</button>}
+      {url && <button className="btn btn-quiet btn-block" style={{ marginTop: 8 }} disabled={busy} onClick={openWidget}><Smartphone size={16} />{tr('홈 화면 위젯 만들기')}</button>}
       {saved && <WidgetSheet open={widget} onClose={() => setWidget(false)} viewId={saved.id} />}
     </section>
   )

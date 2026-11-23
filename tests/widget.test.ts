@@ -51,5 +51,18 @@ check('여행 뒤: 다녀온 여행', after.texts.includes('다녀온 여행'), 
 const off = await run('2026-12-08T12:00:00', 'medium', true)
 check('인터넷이 없으면 받지 못했다고 알린다 (처음 실행)', off.texts.some((t) => t.includes('받지 못했어요')), off.texts)
 
+// 안드로이드(KWGT)용 위젯 주소: 계산한 값을 납작하게
+{
+  const { handleWidget, widgetData, nowIn } = await import('../server/widget')
+  const w = widgetData(trip as never, 'ko', { date: '2026-12-08', hm: '12:00' })
+  check('위젯 데이터: 2일차, 다음은 항공편, 줄마다', w.badge === '2일차' && w.next === '13:05 ✈ NZ501 AKL→CHC' && w.line1 === w.next.replace(' ', '  ') && w.count === 3 && w.text.startsWith('뉴질랜드 남섬 · 2일차\n12.8\n'), w)
+  const before = widgetData(trip as never, 'en', { date: '2026-12-01', hm: '09:00' })
+  check('여행 전 (영어): D-6, 첫날 일정', before.badge === 'D-6' && before.text.includes('First day · 12.7') && before.line1.includes('Sky Tower'), before)
+  check('여행 뒤: 다녀온 여행, 일정 줄 없음', widgetData(trip as never, 'ko', { date: '2026-12-20', hm: '09:00' }).text === '뉴질랜드 남섬 · 다녀온 여행\n12.9')
+  check('시간대: 서울 기준 날짜', nowIn('Asia/Seoul', new Date('2026-12-07T16:30:00Z')).date === '2026-12-08' && nowIn('Asia/Seoul', new Date('2026-12-07T16:30:00Z')).hm === '01:30')
+  const api = await handleWidget(made.id, new URLSearchParams('lang=ko&format=txt'), store)
+  check('주소로 받기 (글)', api.status === 200 && api.type.startsWith('text/plain') && api.body.startsWith('뉴질랜드 남섬 · '), api)
+  check('없는 링크', (await handleWidget('NOPE12345', new URLSearchParams(''), store)).status === 404)
+}
 console.log(fails ? `\n${fails}개 실패` : '\n모두 통과')
 process.exit(fails ? 1 : 0)
