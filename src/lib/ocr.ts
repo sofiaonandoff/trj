@@ -169,7 +169,7 @@ export function despaceCJK(line: string): string {
   return out.replace(new RegExp(`(?<=[${CJK}])\\s+(?=[.,)])`, 'gu'), '')
 }
 
-export interface OcrResult { lines: OcrLine[]; confidence: number; langs: string[]; /** 원본 대비 읽은 그림의 배율 (줄 위치를 원본 좌표로 바꿀 때) */ scale?: number }
+export interface OcrResult { lines: OcrLine[]; confidence: number; langs: string[]; /** 원본 대비 읽은 그림의 배율 (줄 위치를 원본 좌표로 바꿀 때) */ scale?: number; /** 다른 언어 조합으로 읽은 결과 (확신도는 낮아도 항공편 같은 영문·숫자는 더 잘 읽었을 수 있다) */ others?: OcrLine[][] }
 
 async function readOnce(canvas: HTMLCanvasElement, langs: string[], onProgress?: (p: number) => void, psm = '6'): Promise<OcrResult> {
   const worker = await workerFor(langs, onProgress)
@@ -201,19 +201,23 @@ export async function recognize(file: Blob, passes: string[][], onProgress?: (p:
   // 확신도가 비슷하면 더 많은 글자를 읽은 쪽
   const score = (x: OcrResult) => x.confidence + Math.min(12, x.lines.length * 1.5)
   let best: OcrResult | undefined
+  const all: OcrResult[] = []
+  const others = () => all.filter((x) => x !== best).map((x) => x.lines)
   for (const langs of passes) {
     const r = await readOnce(canvas, langs, onProgress)
+    all.push(r)
     if (!best || score(r) > score(best)) best = r
     // 충분히 잘 읽었으면 더 하지 않는다
-    if (best.confidence >= 88 && best.lines.length >= 3) return { ...best, scale: canvas.width / bmpW }
+    if (best.confidence >= 88 && best.lines.length >= 3) return { ...best, scale: canvas.width / bmpW, others: others() }
   }
   // 다듬은 사진으로 잘 안 읽히면 원본 그대로도 읽어 본다 (흐린 사진은 대비를 늘리면 오히려 나빠질 때가 있다)
   if (best!.confidence < 80) {
     const raw = await prepare(file, false)
     const r = await readOnce(raw, best!.langs, onProgress)
+    all.push(r)
     if (score(r) > score(best!)) best = r
   }
-  return { ...best!, scale: canvas.width / bmpW }
+  return { ...best!, scale: canvas.width / bmpW, others: others() }
 }
 
 /**

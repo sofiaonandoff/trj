@@ -72,9 +72,15 @@ export async function readTripPhoto(file: File, trip: Trip, current: string, onS
   const ocr = pdf
     ? { lines: await import('./pdfText').then((m) => m.pdfLines(file)).catch(() => []), langs: [] as string[], scale: 1, confidence: 100 }
     : await recognize(file, ocrPasses(here.country ?? trip.country), (p) => onStage?.(tr('글자 인식 준비 중 {0}%', Math.round(p * 100)))).catch(() => ({ lines: [], langs: [] as string[], scale: 1, confidence: 0 }))
-  const lines = ocr.lines
   await loadWorldAirports()
-  const r = readText(lines, days, trip.currency)
+  // 가장 믿을 만한 언어 조합의 결과를 쓰되, 다른 조합이 항공편을 더 많이 찾았으면 그쪽.
+  // (태국 여행에서 태국어로 읽으면 'MU8611'이 '[ทบ8611'처럼 깨져 경유 항공편 한 구간을 놓친다)
+  let lines = ocr.lines
+  let r = readText(lines, days, trip.currency)
+  for (const alt of ('others' in ocr ? ocr.others : undefined) ?? []) {
+    const r2 = readText(alt, days, trip.currency)
+    if (r2.flights.length > r.flights.length) { r = r2; lines = alt }
+  }
 
   // 숙소 화면인데 체크인·체크아웃이 제대로 안 읽혔으면 그 칸만 크게 키워 다시 읽는다
   const st = r.stay
