@@ -9,7 +9,8 @@ import { ocrPasses, recognize, recognizeBand, signWords } from './ocr'
 import { readExif } from './photos'
 import { readText, stayLabelLine, stayOf } from './receipt'
 import { payerFor, putStay, splitFor, removeStay } from '../store'
-import { addDays, fromMin, km, toMin, travelMin, uid } from './util'
+import { addDays, fromMin, km, toMin, uid } from './util'
+import { hopMin } from './route'
 
 /**
  * "사진으로 추가": 영수증·예약 화면·탑승권·장소 사진을 기기 안에서 읽어 일정과 예산에 넣는다 (AI를 쓰지 않는다).
@@ -307,7 +308,7 @@ export function applyDraft(t: Trip, d: Draft, putFlight: (t: Trip, f: Flight) =>
     else {
       const p = { ...d.place, ...g }
       const last = [...day.items].reverse().find((x) => x.time)
-      if (!p.time && last?.time) p.time = fromMin(Math.round((toMin(last.time) + (last.duration ?? 60) + travelMin(km(last, p))) / 10) * 10)
+      if (!p.time && last?.time) p.time = fromMin(Math.round((toMin(last.time) + (last.duration ?? 60) + hopMin(last, p)) / 10) * 10)
       day.items.push(p)
       // 시각이 있는 곳은 시간 순서대로 둔다
       if (p.time) day.items.sort((a, b) => (a.time ?? '99').localeCompare(b.time ?? '99'))

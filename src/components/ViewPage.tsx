@@ -5,6 +5,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react
 import { CATEGORY } from '../data/destinations'
 import { dayLine, groupRoutes, nextStops, routeSegments } from '../lib/dayline'
 import { ALL, groupOf, useGroupView } from '../lib/groups'
+import { ensureSegments } from '../lib/route'
 import { GroupTabs, GroupTag } from './GroupPicker'
 import { fetchView } from '../lib/drive'
 import { legOf } from '../lib/legs'
@@ -158,6 +159,8 @@ function Day({ trip, idx, setIdx }: { trip: Trip; idx: number; setIdx: (i: numbe
     }
     return { points, arcs, route: routeSegments(line), routes: groupRoutes(trip, day.date, gv, line) }
   }, [line]) // eslint-disable-line react-hooks/exhaustive-deps
+  // 이동 시간·거리는 도로 길찾기로 (받아 둔 것이 없을 때만 묻는다)
+  useEffect(() => { ensureSegments(route); routes?.forEach((r) => ensureSegments(r.segs)) }, [route, routes])
 
   return (
     <>

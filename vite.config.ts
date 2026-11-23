@@ -9,6 +9,7 @@ import { handlePlan, type PlanEnv } from './server/plan'
 import { handleView, memoryStore } from './server/view'
 import { handleTranslate } from './server/translate'
 import { handleWidget } from './server/widget'
+import { handleRoute } from './server/route'
 
 /**
  * 로컬(npm run dev / preview)에서도 /api/plan이 동작하게 한다.
@@ -61,6 +62,20 @@ function localApi(env: PlanEnv): Plugin {
       res.end(JSON.stringify(r.json))
     })
   }
+  // 길찾기: 로컬에서도 같은 서버(OSRM)에 묻고, 받은 구간은 메모리에 둔다
+  const routeHandler = (req: Req, res: Res, next: () => void) => {
+    if (req.method !== 'POST') return next()
+    let raw = ''
+    req.on('data', (chunk) => { raw += String(chunk) })
+    req.on('end', async () => {
+      let body: unknown = null
+      try { body = JSON.parse(raw) } catch { /* 400 */ }
+      const r = body ? await handleRoute(body, { TRJ_VIEWS: views, ORS_API_KEY: (env as { ORS_API_KEY?: string }).ORS_API_KEY }) : { status: 400, json: { error: 'bad_request' } }
+      res.statusCode = r.status
+      res.setHeader('Content-Type', 'application/json')
+      res.end(JSON.stringify(r.json))
+    })
+  }
   const widgetHandler = async (req: { url?: string }, res: Res) => {
     const u = new URL(req.url ?? '/', 'http://x')
     const r = await handleWidget(u.pathname.replace(/^\/+/, ''), u.searchParams, views)
@@ -70,7 +85,7 @@ function localApi(env: PlanEnv): Plugin {
   }
   const use = (server: { middlewares: { use: (p: string, h: never) => void } }) => {
     server.middlewares.use('/api/plan', handler as never); server.middlewares.use('/api/view', viewHandler as never); server.middlewares.use('/api/translate', translateHandler as never)
-    server.middlewares.use('/api/widget', widgetHandler as never)
+    server.middlewares.use('/api/widget', widgetHandler as never); server.middlewares.use('/api/route', routeHandler as never)
   }
   return {
     name: 'trj-local-api',

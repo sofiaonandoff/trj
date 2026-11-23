@@ -12,7 +12,7 @@ import { legOf } from '../lib/legs'
 import { flightMinutes, isComplete, parseFlightText } from '../lib/flight'
 import { localizeResults, searchPlaces, type GeoResult } from '../lib/geocode'
 import { poiToPlace, retime, shortest, suggestions } from '../lib/planner'
-import { arc, dateRange, distLabel, fmtDur, fromMin, haptic, km, md, toMin, travelLabel, travelMin, uid, weekday, won, wonShort } from '../lib/util'
+import { arc, dateRange, distLabel, fmtDur, fromMin, haptic, km, md, toMin, uid, weekday, won, wonShort } from '../lib/util'
 import { putFlight, removePlace, syncPlaceCost, useStore } from '../store'
 import CurrencySelect from './CurrencySelect'
 import { baseOf, krwToBase, money, moneyShort, toWon, unit } from '../data/currencies'
@@ -21,6 +21,7 @@ import type { MapPoint } from './MapView'
 import PhotoImport from './PhotoImport'
 import StaySheet, { type StayDraft } from './StaySheet'
 import { DEFAULT_IN, DEFAULT_OUT, dayLine, groupRoutes, hopFrom, nextStops, nightStay, routeSegments, type Entry, type LL } from '../lib/dayline'
+import { ensureSegments, hop, hopLabel, hopMin, useRoutes } from '../lib/route'
 import { Sheet, toast } from './ui'
 
 const MapView = lazy(() => import('./MapView'))
@@ -81,11 +82,15 @@ export default function PlanTab({ trip }: { trip: Trip }) {
     return { points, arcs, route: routeSegments(line), routes, picks }
   }, [line]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 이 날 동선의 도로 길찾기를 받아 둔다 (받으면 이동 시간·거리가 실제 값으로 바뀐다)
+  useEffect(() => { ensureSegments(route); routes?.forEach((r) => ensureSegments(r.segs)) }, [route, routes])
+
   /** 예약 비용으로 기록한 지출: '89 NZD' */
   const paidOf = (p: Place) => { const x = p.expenseId ? trip.expenses.find((e) => e.id === p.expenseId) : undefined; return x ? `${x.amount.toLocaleString('ko-KR')} ${unit(x.currency)}` : undefined }
   const dayCost = items.reduce((s, p) => s + (p.expenseId ? 0 : p.cost ?? 0), 0)
   const dayPaid = items.reduce((s, p) => { const x = p.expenseId ? trip.expenses.find((e) => e.id === p.expenseId) : undefined; return s + (x ? toWon(trip, x.amount, x.currency) : 0) }, 0)
-  const dayDist = items.slice(1).reduce((s, p, i) => s + km(items[i], p), 0)
+  useRoutes()
+  const dayDist = items.slice(1).reduce((s, p, i) => s + hop(items[i], p).km, 0)
 
   return (
     <>
@@ -226,7 +231,10 @@ function PlaceRow({ p, n, next, only, onOpen, onToggle, paid, est, tag, color }:
 }
 
 export function Hop({ from, to }: { from?: LL; to?: LL }) {
-  return from && to ? <div className="hop">{travelLabel(km(from, to))} · {distLabel(km(from, to))}</div> : <div style={{ height: 10 }} />
+  useRoutes()
+  if (!from || !to) return <div style={{ height: 10 }} />
+  const h = hop(from, to)
+  return <div className="hop">{hopLabel(h)} · {distLabel(h.km)}</div>
 }
 
 /** 항공편: 그 날 시각에 맞춰 장소 사이에 들어가고, 공항이 동선의 한 지점이 된다 */
@@ -337,7 +345,7 @@ function AddPlaceSheet({ open, initial, onClose, trip, di }: { open: boolean; in
     mutate(trip.id, (t) => {
       const items = t.days[di].items
       const last = items[items.length - 1]
-      if (last?.time) place.time = fromMin(Math.round((toMin(last.time) + (last.duration ?? 60) + travelMin(km(last, place))) / 10) * 10)
+      if (last?.time) place.time = fromMin(Math.round((toMin(last.time) + (last.duration ?? 60) + hopMin(last, place)) / 10) * 10)
       // 그룹 화면에서 넣으면 그 그룹의 일정
       const g = currentGroup(trip.id)
       if (g && !place.group) place.group = g

@@ -1,7 +1,8 @@
 import { tr } from '../i18n'
 import type { Destination, Poi } from '../data/destinations'
 import type { Category, CheckItem, Day, Place, Trip } from '../types'
-import { dateRange, fromMin, km, travelMin, uid } from './util'
+import { dateRange, fromMin, km, uid } from './util'
+import { hopMin } from './route'
 
 export type Pace = 'slow' | 'normal' | 'full'
 export const PACE: Record<Pace, { label: string; hint: string; minutes: number }> = {
@@ -50,7 +51,7 @@ export function schedule(pois: Poi[], startAt = 9 * 60 + 30): Place[] {
     if (!lunched && cursor >= 12 * 60 && cursor < 15 * 60 && p.category !== 'food') { cursor += 60; lunched = true }
     if (p.category === 'food') lunched = true
     const place = { ...toPlace(p), time: fromMin(Math.round(cursor / 10) * 10) }
-    cursor += p.duration + (pois[i + 1] ? travelMin(km(p, pois[i + 1])) : 0)
+    cursor += p.duration + (pois[i + 1] ? hopMin(p, pois[i + 1]) : 0)
     return place
   })
 }
@@ -167,7 +168,7 @@ export function retime(items: Place[]) {
   let cursor = items[0]?.time ? Number(items[0].time.slice(0, 2)) * 60 + Number(items[0].time.slice(3)) : 9 * 60 + 30
   items.forEach((p, i) => {
     p.time = fromMin(Math.round(cursor / 10) * 10)
-    cursor += (p.duration ?? 60) + (items[i + 1] ? travelMin(km(p, items[i + 1])) : 0)
+    cursor += (p.duration ?? 60) + (items[i + 1] ? hopMin(p, items[i + 1]) : 0)
   })
 }
 
@@ -211,7 +212,7 @@ export function fitAfterArrival(t: Trip, f: { to: string; arrDate: string; arrTi
   const before = day.items.filter((p) => !set.has(p) && p.time && toMinute(p.time) < ready)
   const after = day.items.filter((p) => !set.has(p) && !before.includes(p))
   const chain = [...early, ...after]
-  let cursor = ready + travelMin(km(at, chain[0]))
+  let cursor = ready + hopMin(at, chain[0])
   const keep: Place[] = [], overflow: Place[] = []
   chain.forEach((p, i) => {
     const own = p.time && after.includes(p) ? toMinute(p.time) : 0
@@ -219,7 +220,7 @@ export function fitAfterArrival(t: Trip, f: { to: string; arrDate: string; arrTi
     if (cursor > LATEST || overflow.length) { overflow.push(p); return }
     p.time = fromMin(Math.ceil(cursor / 10) * 10)
     keep.push(p)
-    cursor += (p.duration ?? 60) + (chain[i + 1] ? travelMin(km(p, chain[i + 1])) : 0)
+    cursor += (p.duration ?? 60) + (chain[i + 1] ? hopMin(p, chain[i + 1]) : 0)
   })
   day.items = [...before, ...keep]
 
