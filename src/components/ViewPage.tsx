@@ -3,7 +3,9 @@ import { tx, useTranslations } from '../lib/translate'
 import { Download, Eye, ListChecks, MapPin, RefreshCw, Route, Wallet } from 'lucide-react'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { CATEGORY } from '../data/destinations'
-import { dayLine, nextStops, routeSegments } from '../lib/dayline'
+import { dayLine, groupRoutes, nextStops, routeSegments } from '../lib/dayline'
+import { ALL, groupOf, useGroupView } from '../lib/groups'
+import { GroupTabs, GroupTag } from './GroupPicker'
 import { fetchView } from '../lib/drive'
 import { legOf } from '../lib/legs'
 import { decodeView } from '../lib/share'
@@ -131,16 +133,22 @@ function Day({ trip, idx, setIdx }: { trip: Trip; idx: number; setIdx: (i: numbe
   useTranslations()
   const di = Math.min(idx, trip.days.length - 1)
   const day = trip.days[di]
-  const line = useMemo(() => dayLine(trip, day.date), [trip, day.date])
+  // 보기 링크에서도 그룹 탭을 고를 수 있다 (이 기기에서만 기억)
+  const [view, setView] = useGroupView(trip)
+  const gv = trip.groups?.length ? view : undefined
+  const inAll = gv === ALL
+  const colorOf = (x: { group?: string }) => groupOf(trip, inAll ? x.group : gv === ALL ? undefined : gv)?.color
+  const tagOf = (x: { group?: string }) => (inAll ? groupOf(trip, x.group) : undefined)
+  const line = useMemo(() => dayLine(trip, day.date, gv), [trip, day.date, gv])
   const nexts = useMemo(() => nextStops(line), [line])
   const only = line.filter((e) => e.kind !== 'stay-missing').length === 1
   const leg = legOf(trip, day.date)
-  const { points, arcs, route } = useMemo(() => {
+  const { points, arcs, route, routes } = useMemo(() => {
     const points: MapPoint[] = []
     const arcs: [number, number][][] = []
     const seen = new Set<string>()
     for (const e of line) {
-      if (e.kind === 'place') points.push({ lat: e.place.lat, lng: e.place.lng, label: String(e.index + 1), title: e.place.name })
+      if (e.kind === 'place') points.push({ lat: e.place.lat, lng: e.place.lng, label: String(e.no + 1), title: e.place.name, color: colorOf(e.place) })
       else if ((e.kind === 'stay-start' || e.kind === 'stay-end') && !seen.has(e.stay.id)) { seen.add(e.stay.id); points.push({ lat: e.stay.lat, lng: e.stay.lng, label: '', stay: true, title: e.stay.name }) }
       else if (e.kind === 'flight') {
         const { from: a, to: b } = e
@@ -148,8 +156,8 @@ function Day({ trip, idx, setIdx }: { trip: Trip; idx: number; setIdx: (i: numbe
         for (const ap of [a, b]) if (ap && !seen.has(ap.code)) { seen.add(ap.code); points.push({ lat: ap.lat, lng: ap.lng, label: ap.code, air: true, title: ap.name }) }
       }
     }
-    return { points, arcs, route: routeSegments(line) }
-  }, [line])
+    return { points, arcs, route: routeSegments(line), routes: groupRoutes(trip, day.date, gv, line) }
+  }, [line]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <>
@@ -160,30 +168,31 @@ function Day({ trip, idx, setIdx }: { trip: Trip; idx: number; setIdx: (i: numbe
           </button>
         ))}
       </div>
+      <GroupTabs trip={trip} view={view} onChange={setView} />
       <div className="plan-map">
-        <Suspense fallback={null}><MapView points={points} arcs={arcs} route={route} center={leg} /></Suspense>
+        <Suspense fallback={null}><MapView points={points} arcs={arcs} route={route} routes={routes} center={leg} /></Suspense>
       </div>
-      <div className="day-head"><div><h2>{tr('{0}일차', di + 1)}</h2><p>{day.items.length ? tr('{0}곳', day.items.length) : tr('정해진 장소가 없습니다')}</p></div></div>
+      <div className="day-head"><div><h2>{tr('{0}일차', di + 1)}</h2><p>{(() => { const n = line.filter((e) => e.kind === 'place').length; return n ? tr('{0}곳', n) : tr('정해진 장소가 없습니다') })()}</p></div></div>
       {line.length === 0 ? <div className="empty slim">{tr('자유 일정')}</div> : (
         <ol className="tl">
           {line.map((e, i) => {
             const next = nexts[i]
             switch (e.kind) {
               case 'stay-start': case 'stay-end':
-                return <StayRow key={`${e.kind}${e.stay.id}`} e={e} date={day.date} next={next} only={only} onOpen={() => maps(e.stay.address || e.stay.name, e.stay)} />
+                return <StayRow key={`${e.kind}${e.stay.id}`} e={e} date={day.date} next={next} only={only} tag={tagOf(e.stay)} onOpen={() => maps(e.stay.address || e.stay.name, e.stay)} />
               case 'flight':
-                return <FlightRow key={`${e.arriving ? 'a' : 'd'}${e.flight.id}`} e={e} next={next} only={only} onOpen={() => undefined} />
+                return <FlightRow key={`${e.arriving ? 'a' : 'd'}${e.flight.id}`} e={e} next={next} only={only} tag={tagOf(e.flight)} onOpen={() => undefined} />
               case 'place': {
                 const p = e.place, c = CATEGORY[p.category]
                 return (
                   <li key={p.id} className={`tl-item${only ? ' only' : ''}`}>
                     <div className="tl-time">{p.time ?? ''}</div>
-                    <div className="tl-rail"><span className="tl-node">{e.index + 1}</span></div>
+                    <div className="tl-rail"><span className="tl-node" style={colorOf(p) ? { background: colorOf(p) } : undefined}>{e.no + 1}</span></div>
                     <div className="tl-body">
                       <div className="card">
                         <button className="card-main" onClick={() => maps(p.address || p.name, p.address ? undefined : p)} aria-label={tr('{0} 지도에서 보기', p.name)}>
                           <h3>{tx(p.name)}</h3>
-                          <div className="sub"><span className="cat" style={{ color: c.color }}>{c.label}</span>{p.duration ? <span>{fmtDur(p.duration)}</span> : null}<span className="map-hint"><MapPin size={12} />{tr('지도')}</span></div>
+                          <div className="sub"><GroupTag g={tagOf(p)} /><span className="cat" style={{ color: c.color }}>{c.label}</span>{p.duration ? <span>{fmtDur(p.duration)}</span> : null}<span className="map-hint"><MapPin size={12} />{tr('지도')}</span></div>
                           {p.note && <div className="note">{tx(p.note)}</div>}
                         </button>
                       </div>

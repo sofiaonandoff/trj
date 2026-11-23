@@ -3,6 +3,8 @@ export type Category = 'sight' | 'food' | 'cafe' | 'shop' | 'nature' | 'culture'
 export interface Place {
   /** 마지막으로 고친 시각(ms). 기기 간 병합에 쓴다 */
   u?: number
+  /** 그룹 일정이면 그 그룹 id (없으면 모두의 일정) */
+  group?: string
   id: string
   name: string
   lat: number
@@ -29,6 +31,8 @@ export interface Day {
 export interface Flight {
   /** 마지막으로 고친 시각(ms). 기기 간 병합에 쓴다 */
   u?: number
+  /** 그룹 일정이면 그 그룹 id (없으면 모두의 일정) */
+  group?: string
   id: string
   flightNo: string
   from: string // IATA
@@ -45,6 +49,8 @@ export interface Flight {
 export interface Stay {
   /** 마지막으로 고친 시각(ms). 기기 간 병합에 쓴다 */
   u?: number
+  /** 그룹 일정이면 그 그룹 id (없으면 모두의 일정) */
+  group?: string
   id: string
   name: string
   lat: number
@@ -61,6 +67,17 @@ export interface Stay {
   note?: string
   /** 숙박비를 예산에 남겼으면 그 지출 id */
   expenseId?: string
+}
+
+/** 여행 안에서 따로 움직이는 동행 묶음 (예: 끄라비팀 A·B, 방콕팀 C·D) */
+export interface Group {
+  /** 마지막으로 고친 시각(ms). 기기 간 병합에 쓴다 */
+  u?: number
+  id: string
+  name: string
+  color: string
+  /** 들어간 동행(Member.id). 한 사람이 여러 그룹에 들어갈 수 있다 */
+  members: string[]
 }
 
 export interface Member {
@@ -92,6 +109,8 @@ export type ExpenseCategory = 'food' | 'stay' | 'move' | 'play' | 'shop' | 'etc'
 export interface Expense {
   /** 마지막으로 고친 시각(ms). 기기 간 병합에 쓴다 */
   u?: number
+  /** 그룹 일정이면 그 그룹 id (없으면 모두의 일정) */
+  group?: string
   id: string
   title: string
   amount: number
@@ -135,6 +154,8 @@ export interface Trip {
   /** 숙소 (예전에 만든 여행에는 없을 수 있다) */
   stays?: Stay[]
   members: Member[]
+  /** 따로 움직이는 동행 묶음 */
+  groups?: Group[]
   expenses: Expense[]
   checklist: CheckItem[]
   journal: Record<string, JournalEntry>

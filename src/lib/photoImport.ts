@@ -8,7 +8,7 @@ import { legOf } from './legs'
 import { ocrPasses, recognize, recognizeBand, signWords } from './ocr'
 import { readExif } from './photos'
 import { readText, stayLabelLine, stayOf } from './receipt'
-import { putStay, removeStay } from '../store'
+import { payerFor, putStay, splitFor, removeStay } from '../store'
 import { addDays, fromMin, km, toMin, travelMin, uid } from './util'
 
 /**
@@ -272,12 +272,14 @@ export interface Applied {
 }
 
 /** 넣을 거리를 여행에 넣는다 (mutate 안에서 부른다). 같은 영수증을 두 번 올려도 겹치지 않게 한다 */
-export function applyDraft(t: Trip, d: Draft, putFlight: (t: Trip, f: Flight) => unknown): Applied {
+/** group: 지금 보고 있는 그룹 (넣는 장소·숙소·항공편·지출이 그 그룹의 일정이 된다) */
+export function applyDraft(t: Trip, d: Draft, putFlight: (t: Trip, f: Flight) => unknown, group?: string): Applied {
+  const g = group ? { group } : {}
   const res: Applied = { date: d.date, dateFrom: d.dateFrom, title: d.place?.name ?? d.flight?.flightNo ?? d.expense?.title ?? '', noPlace: d.noPlace }
   if (d.flight) {
     const same = t.flights.find((f) => f.flightNo === d.flight!.flightNo && f.depDate === d.flight!.depDate && f.depTime === d.flight!.depTime)
     if (same) res.duplicate = true
-    else { putFlight(t, d.flight); res.flightId = d.flight.id; res.airportChoices = d.airportChoices }
+    else { putFlight(t, { ...d.flight, ...g }); res.flightId = d.flight.id; res.airportChoices = d.airportChoices }
     res.time = d.flight.depTime
     // 편명이 없으면 항공사 이름과 구간으로 보여 준다: '스쿠트 SIN → BKK'
     res.title = `${/\d/.test(d.flight.flightNo) ? d.flight.flightNo : airlineOf(d.flight.flightNo) || d.flight.flightNo} ${d.flight.from} → ${d.flight.to}`
@@ -287,7 +289,7 @@ export function applyDraft(t: Trip, d: Draft, putFlight: (t: Trip, f: Flight) =>
     if (same) { res.duplicate = true; res.stayId = same.id }
     else {
       // 숙박비는 숙소에 묶어 둔다 (숙소를 지우면 함께 지워진다)
-      putStay(t, { ...d.stay }, d.expense ? { amount: d.expense.amount, currency: d.expense.currency } : undefined)
+      putStay(t, { ...d.stay, ...g }, d.expense ? { amount: d.expense.amount, currency: d.expense.currency } : undefined)
       res.stayId = d.stay.id
       res.stayAdded = true
     }
@@ -303,7 +305,7 @@ export function applyDraft(t: Trip, d: Draft, putFlight: (t: Trip, f: Flight) =>
     const same = day.items.find((p) => p.name === d.place!.name)
     if (same) res.placeId = same.id
     else {
-      const p = { ...d.place }
+      const p = { ...d.place, ...g }
       const last = [...day.items].reverse().find((x) => x.time)
       if (!p.time && last?.time) p.time = fromMin(Math.round((toMin(last.time) + (last.duration ?? 60) + travelMin(km(last, p))) / 10) * 10)
       day.items.push(p)
@@ -319,8 +321,7 @@ export function applyDraft(t: Trip, d: Draft, putFlight: (t: Trip, f: Flight) =>
     const same = t.expenses.find((x) => x.title === e.title && x.amount === e.amount && x.date === e.date)
     if (same) res.duplicate = res.duplicate ?? !res.placeId
     else {
-      const me = t.members[0]?.id ?? ''
-      t.expenses.push({ ...e, payer: me, split: t.members.map((m) => m.id) })
+      t.expenses.push({ ...e, ...g, payer: payerFor(t, group), split: splitFor(t, group) })
       res.expenseId = e.id
       // 새로 넣은 장소면 비용을 장소에 묶는다 (장소에서 금액·통화를 고치고, 장소를 지우면 함께 지워진다)
       if (res.placeAdded) { const p = day?.items.find((x) => x.id === res.placeId); if (p) p.expenseId = e.id }

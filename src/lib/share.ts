@@ -41,6 +41,7 @@ export function viewOf(t: Trip): Trip {
     flights: t.flights.map(({ u: _u, pnr: _p, seat: _s, ...f }) => f),
     stays: (t.stays ?? []).map(({ u: _u, code: _c, ...st }) => st),
     members: t.members.map((m) => ({ id: m.id, name: m.name, color: m.color })),
+    groups: t.groups?.map(({ u: _u, ...g }) => g),
     expenses: t.expenses.map(({ u: _u, ...e }) => e),
     checklist: t.checklist.map(({ u: _u, ...c }) => c),
     journal: {},

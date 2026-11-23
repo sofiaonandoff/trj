@@ -1,4 +1,7 @@
 import { tr } from '../i18n'
+import GroupPicker from './GroupPicker'
+import { currentGroup } from '../lib/groups'
+import { splitFor, payerFor } from '../store'
 import { tx, useTranslations } from '../lib/translate'
 import { ArrowRight, Plus, Trash2 } from 'lucide-react'
 import { useEffect, useState, useSyncExternalStore } from 'react'
@@ -61,6 +64,9 @@ export default function BudgetTab({ trip, readOnly = false }: { trip: Trip; read
   // 환율을 보여 줄 화폐: 여행지 화폐와 지출에 쓴 화폐 (기준 화폐는 빼고)
   const used = [...new Set([trip.currency, ...trip.expenses.map((e) => e.currency)])].filter((c) => c !== base)
   // 결제한 사람별: 낸 돈과 자기 몫
+  // 그룹별로 쓴 돈: 그룹을 고른 지출만 (모두의 지출은 따로 한 줄)
+  const byGroup = (trip.groups ?? []).map((g) => { const xs = trip.expenses.filter((e) => e.group === g.id); return { g, v: xs.reduce((s, e) => s + toWon(e), 0), n: xs.length } })
+  const sharedSpend = trip.expenses.filter((e) => !e.group || !trip.groups?.some((g) => g.id === e.group)).reduce((s, e) => s + toWon(e), 0)
   const byPayer = trip.members.map((m) => ({
     m,
     paid: trip.expenses.filter((e) => e.payer === m.id).reduce((s, e) => s + toWon(e), 0),
@@ -140,6 +146,24 @@ export default function BudgetTab({ trip, readOnly = false }: { trip: Trip; read
         </section>
       )}
 
+      {byGroup.length > 0 && total > 0 && (
+        <section className="panel">
+          <h2>{tr('그룹별로 쓴 돈')}</h2>
+          {byGroup.map(({ g, v, n }) => (
+            <div className="payer group-sum" key={g.id}>
+              <i className="dot" style={{ background: g.color }} />
+              <span className="grow"><b>{g.name}</b><small>{n ? tr('{0}건', n) : tr('기록 없음')} · {g.members.map((id) => name(id)?.name).filter(Boolean).join(', ')}</small></span>
+              <b className="num">{M(v)}</b>
+            </div>
+          ))}
+          <div className="payer group-sum">
+            <i className="dot" style={{ background: 'var(--line)' }} />
+            <span className="grow"><b>{tr('모두')}</b><small>{tr('그룹을 고르지 않은 지출')}</small></span>
+            <b className="num">{M(sharedSpend)}</b>
+          </div>
+        </section>
+      )}
+
       {trip.members.length > 1 && transfers.length > 0 && (
         <section className="panel">
           <h2>{tr('이렇게 보내면 정산 끝')}</h2>
@@ -184,9 +208,10 @@ function ExpenseSheet({ trip, edit, onClose }: { trip: Trip; edit?: Expense | 'n
   useEffect(() => {
     if (!edit) return
     const t = today()
+    const g = currentGroup(trip.id)
     setD(existing ? { ...existing } : {
-      id: uid(), title: '', amount: 0, currency: trip.currency, category: 'food', payer: trip.members[0].id,
-      split: trip.members.map((m) => m.id), date: t >= trip.start && t <= trip.end ? t : trip.start,
+      id: uid(), title: '', amount: 0, currency: trip.currency, category: 'food', payer: payerFor(trip, g),
+      split: splitFor(trip, g), date: t >= trip.start && t <= trip.end ? t : trip.start, ...(g ? { group: g } : {}),
     })
   }, [edit]) // eslint-disable-line react-hooks/exhaustive-deps
   const set = (p: Partial<Expense>) => setD((x) => (x ? { ...x, ...p } : x))
@@ -209,6 +234,7 @@ function ExpenseSheet({ trip, edit, onClose }: { trip: Trip; edit?: Expense | 'n
       </>}>
       {d && (
         <div className="stack">
+          <GroupPicker trip={trip} value={d.group} label={tr('누구 지출')} onChange={(g) => set({ group: g, split: splitFor(trip, g), payer: splitFor(trip, g).includes(d.payer) ? d.payer : payerFor(trip, g) })} />
           <label className="field"><span>{tr('내용')}</span><input value={d.title} onChange={(e) => set({ title: e.target.value })} placeholder={tr('예: 저녁 라멘')} /></label>
           <div className="row">
             <label className="field"><span>{tr('금액')}</span><input type="number" inputMode="decimal" min={0} value={d.amount || ''} onChange={(e) => set({ amount: Number(e.target.value) })} /></label>

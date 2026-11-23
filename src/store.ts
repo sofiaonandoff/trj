@@ -50,6 +50,22 @@ export function syncDays(t: Trip) {
   if (orphan.length) t.days[t.days.length - 1].items.push(...orphan)
 }
 
+/** 그룹 지출의 나눌 사람: 그 그룹 동행 (없으면 모두) */
+export function splitFor(t: Trip, group?: string): string[] {
+  const g = group ? t.groups?.find((x) => x.id === group) : undefined
+  const ids = g?.members.filter((m) => t.members.some((x) => x.id === m)) ?? []
+  return ids.length ? ids : t.members.map((m) => m.id)
+}
+/** 결제한 사람 기본값: 그룹이면 그 그룹의 첫 사람 */
+export const payerFor = (t: Trip, group?: string) => splitFor(t, group)[0] ?? t.members[0]?.id ?? ''
+/** 묶인 지출의 그룹을 장소·숙소의 그룹과 맞춘다 (그룹이 바뀌면 나눌 사람도 그 그룹으로) */
+function syncGroup(t: Trip, e: { group?: string; split: string[]; payer: string }, group?: string) {
+  if ((e.group ?? '') === (group ?? '')) return
+  if (group) e.group = group; else delete e.group
+  e.split = splitFor(t, group)
+  if (!e.split.includes(e.payer)) e.payer = payerFor(t, group)
+}
+
 /**
  * 숙소를 저장한다. 숙박비가 있으면 체크인 날의 숙박 지출로 예산에 남기고, 지출은 숙소와 함께 고쳐지고 지워진다.
  * 기간이 여행 밖이면 여행 기간을 넓힌다.
@@ -60,16 +76,16 @@ export function putStay(t: Trip, stay: Stay, cost?: { amount: number; currency: 
   const s = { ...stay }
   const linked = s.expenseId ? t.expenses.find((e) => e.id === s.expenseId) : undefined
   if (cost && cost.amount > 0) {
-    if (linked) Object.assign(linked, { title: s.name, amount: cost.amount, currency: cost.currency, date: s.checkIn })
+    if (linked) { Object.assign(linked, { title: s.name, amount: cost.amount, currency: cost.currency, date: s.checkIn }); syncGroup(t, linked, s.group) }
     else {
       const id = uid()
-      t.expenses.push({ id, title: s.name, amount: cost.amount, currency: cost.currency, category: 'stay', payer: t.members[0]?.id ?? '', split: t.members.map((m) => m.id), date: s.checkIn })
+      t.expenses.push({ id, title: s.name, amount: cost.amount, currency: cost.currency, category: 'stay', payer: payerFor(t, s.group), split: splitFor(t, s.group), date: s.checkIn, ...(s.group ? { group: s.group } : {}) })
       s.expenseId = id
     }
   } else if (cost && linked) {
     t.expenses = t.expenses.filter((e) => e.id !== linked.id)
     s.expenseId = undefined
-  }
+  } else if (linked) syncGroup(t, linked, s.group)
   if (i >= 0) stays[i] = s; else stays.push(s)
   stays.sort((a, b) => a.checkIn.localeCompare(b.checkIn))
   if (s.checkIn < t.start) t.start = s.checkIn
@@ -87,10 +103,10 @@ export const expenseCategoryOf = (c: Category): ExpenseCategory => (c === 'food'
 export function syncPlaceCost(t: Trip, place: Place, date: string, cost?: { amount: number; currency: string }) {
   const linked = place.expenseId ? t.expenses.find((e) => e.id === place.expenseId) : undefined
   if (cost && cost.amount > 0) {
-    if (linked) Object.assign(linked, { title: place.name, amount: cost.amount, currency: cost.currency, date })
+    if (linked) { Object.assign(linked, { title: place.name, amount: cost.amount, currency: cost.currency, date }); syncGroup(t, linked, place.group) }
     else {
       const id = uid()
-      t.expenses.push({ id, title: place.name, amount: cost.amount, currency: cost.currency, category: expenseCategoryOf(place.category), payer: t.members[0]?.id ?? '', split: t.members.map((m) => m.id), date })
+      t.expenses.push({ id, title: place.name, amount: cost.amount, currency: cost.currency, category: expenseCategoryOf(place.category), payer: payerFor(t, place.group), split: splitFor(t, place.group), date, ...(place.group ? { group: place.group } : {}) })
       place.expenseId = id
     }
   } else if (linked) {

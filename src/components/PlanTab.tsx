@@ -1,4 +1,6 @@
 import { tr } from '../i18n'
+import { ALL, currentGroup, groupOf, useGroupView, visibleIn } from '../lib/groups'
+import GroupPicker, { GroupTabs, GroupTag } from './GroupPicker'
 import { tx, useTranslations } from '../lib/translate'
 import { Reorder, useDragControls } from 'framer-motion'
 import { BedDouble, Camera, Check, Clock, ExternalLink, GripVertical, MapPin, Plane, Plus, Route, Search, Sparkles, Trash2 } from 'lucide-react'
@@ -14,11 +16,11 @@ import { arc, dateRange, distLabel, fmtDur, fromMin, haptic, km, md, toMin, trav
 import { putFlight, removePlace, syncPlaceCost, useStore } from '../store'
 import CurrencySelect from './CurrencySelect'
 import { baseOf, krwToBase, money, moneyShort, toWon, unit } from '../data/currencies'
-import type { Category, Flight, Place, Trip } from '../types'
+import type { Category, Flight, Group, Place, Trip } from '../types'
 import type { MapPoint } from './MapView'
 import PhotoImport from './PhotoImport'
 import StaySheet, { type StayDraft } from './StaySheet'
-import { DEFAULT_IN, DEFAULT_OUT, dayLine, hopFrom, nextStops, nightStay, routeSegments, type Entry, type LL } from '../lib/dayline'
+import { DEFAULT_IN, DEFAULT_OUT, dayLine, groupRoutes, hopFrom, nextStops, nightStay, routeSegments, type Entry, type LL } from '../lib/dayline'
 import { Sheet, toast } from './ui'
 
 const MapView = lazy(() => import('./MapView'))
@@ -40,19 +42,32 @@ export default function PlanTab({ trip }: { trip: Trip }) {
   const di = Math.min(idx, trip.days.length - 1)
   const day = trip.days[di]
 
+  // 그룹: 전체 / 그룹 하나. 그룹이 없는 여행은 지금처럼 하나의 일정
+  const groups = trip.groups ?? []
+  const [view, setView] = useGroupView(trip)
+  const gv = groups.length ? view : undefined
+  const inAll = gv === ALL
+  const tagOf = (x: { group?: string }) => (inAll ? groupOf(trip, x.group) : undefined)
+  const viewColor = gv && gv !== ALL ? groupOf(trip, gv)?.color : undefined
+  /** 이 화면에 보이는 장소와 day.items 안의 자리 */
+  const slots = day.items.map((p, i) => [p, i] as const).filter(([p]) => visibleIn(gv, p))
+  const items = slots.map(([p]) => p)
+  /** 보이는 장소만 바꾼 뒤 원래 자리에 다시 끼운다 (다른 그룹 장소는 그대로) */
+  const putBack = (t: Trip, next: Place[]) => { const all = t.days[di].items; const idx = slots.map(([, i]) => i); idx.forEach((at, k) => { all[at] = next[k] }) }
+
   // 숙소 → 장소 → (시각에 맞춘) 항공편·공항 → 숙소 순서의 하루
-  const line = useMemo(() => dayLine(trip, day.date), [trip, day.date])
+  const line = useMemo(() => dayLine(trip, day.date, gv), [trip, day.date, gv])
   const nexts = useMemo(() => nextStops(line), [line])
   const shown = line.filter((e) => e.kind !== 'stay-missing').length
   const only = shown === 1
 
-  const { points, arcs, route, picks } = useMemo(() => {
+  const { points, arcs, route, routes, picks } = useMemo(() => {
     const points: MapPoint[] = []
     const picks: (() => void)[] = []
     const arcs: [number, number][][] = []
     const seen = new Set<string>()
     for (const e of line) {
-      if (e.kind === 'place') { points.push({ lat: e.place.lat, lng: e.place.lng, label: String(e.index + 1), title: e.place.name }); picks.push(() => setEditId(e.place.id)) }
+      if (e.kind === 'place') { points.push({ lat: e.place.lat, lng: e.place.lng, label: String(e.no + 1), title: e.place.name, color: inAll ? groupOf(trip, e.place.group)?.color : viewColor }); picks.push(() => setEditId(e.place.id)) }
       else if ((e.kind === 'stay-start' || e.kind === 'stay-end') && !seen.has(e.stay.id)) {
         seen.add(e.stay.id)
         points.push({ lat: e.stay.lat, lng: e.stay.lng, label: '', stay: true, title: e.stay.name }); picks.push(() => setStay(e.stay))
@@ -62,14 +77,15 @@ export default function PlanTab({ trip }: { trip: Trip }) {
         for (const ap of [a, b]) if (ap && !seen.has(ap.code)) { seen.add(ap.code); points.push({ lat: ap.lat, lng: ap.lng, label: ap.code, air: true, title: ap.name }); picks.push(() => setFlight(e.flight)) }
       }
     }
-    return { points, arcs, route: routeSegments(line), picks }
-  }, [line])
+    const routes = groupRoutes(trip, day.date, gv, line)
+    return { points, arcs, route: routeSegments(line), routes, picks }
+  }, [line]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /** 예약 비용으로 기록한 지출: '89 NZD' */
   const paidOf = (p: Place) => { const x = p.expenseId ? trip.expenses.find((e) => e.id === p.expenseId) : undefined; return x ? `${x.amount.toLocaleString('ko-KR')} ${unit(x.currency)}` : undefined }
-  const dayCost = day.items.reduce((s, p) => s + (p.expenseId ? 0 : p.cost ?? 0), 0)
-  const dayPaid = day.items.reduce((s, p) => { const x = p.expenseId ? trip.expenses.find((e) => e.id === p.expenseId) : undefined; return s + (x ? toWon(trip, x.amount, x.currency) : 0) }, 0)
-  const dayDist = day.items.slice(1).reduce((s, p, i) => s + km(day.items[i], p), 0)
+  const dayCost = items.reduce((s, p) => s + (p.expenseId ? 0 : p.cost ?? 0), 0)
+  const dayPaid = items.reduce((s, p) => { const x = p.expenseId ? trip.expenses.find((e) => e.id === p.expenseId) : undefined; return s + (x ? toWon(trip, x.amount, x.currency) : 0) }, 0)
+  const dayDist = items.slice(1).reduce((s, p, i) => s + km(items[i], p), 0)
 
   return (
     <>
@@ -81,9 +97,11 @@ export default function PlanTab({ trip }: { trip: Trip }) {
         ))}
       </div>
 
+      <GroupTabs trip={trip} view={view} onChange={(v) => { haptic(); setView(v) }} />
+
       <div className="plan-map">
         <Suspense fallback={null}>
-          <MapView points={points} arcs={arcs} route={route} center={leg} onPick={(i) => picks[i]?.()} />
+          <MapView points={points} arcs={arcs} route={route} routes={routes} center={leg} onPick={(i) => picks[i]?.()} />
         </Suspense>
       </div>
 
@@ -91,7 +109,7 @@ export default function PlanTab({ trip }: { trip: Trip }) {
         <div>
           <h2>{tr('{0}일차', di + 1)}</h2>
           <p>
-            {day.items.length ? tr('{0}곳', day.items.length) : tr('아직 장소가 없습니다')}
+            {items.length ? tr('{0}곳', items.length) : tr('아직 장소가 없습니다')}
             {dayDist > 0 && tr(' · 이동 {0}', distLabel(dayDist))}
             {dayPaid > 0 && tr(' · 예약 비용 {0}', moneyShort(krwToBase(trip, dayPaid), baseOf(trip)))}
             {dayCost > 0 && tr(' · 1인 약 {0}', moneyShort(krwToBase(trip, dayCost), baseOf(trip)))}
@@ -108,17 +126,17 @@ export default function PlanTab({ trip }: { trip: Trip }) {
           </div>
         </div>
       ) : (
-        <Reorder.Group as="ol" axis="y" className="tl" values={day.items} onReorder={(next) => mutate(trip.id, (t) => { t.days[di].items = next as Place[] })}>
+        <Reorder.Group as="ol" axis="y" className="tl" values={items} onReorder={(next) => mutate(trip.id, (t) => putBack(t, next as Place[]))}>
           {line.map((e, i) => {
             const next = nexts[i]
             switch (e.kind) {
               case 'stay-start': case 'stay-end':
-                return <StayRow key={`${e.kind}${e.stay.id}`} e={e} date={day.date} next={next} only={only} onOpen={() => setStay(e.stay)} />
+                return <StayRow key={`${e.kind}${e.stay.id}`} e={e} date={day.date} next={next} only={only} tag={tagOf(e.stay)} onOpen={() => setStay(e.stay)} />
               case 'flight':
-                return <FlightRow key={`${e.arriving ? 'a' : 'd'}${e.flight.id}`} e={e} next={next} only={only} onOpen={() => setFlight(e.flight)} />
+                return <FlightRow key={`${e.arriving ? 'a' : 'd'}${e.flight.id}`} e={e} next={next} only={only} tag={tagOf(e.flight)} onOpen={() => setFlight(e.flight)} />
               case 'place':
                 return (
-                  <PlaceRow key={e.place.id} p={e.place} n={e.index + 1} next={next} only={only} paid={paidOf(e.place)} est={e.place.cost ? moneyShort(krwToBase(trip, e.place.cost), baseOf(trip)) : undefined}
+                  <PlaceRow key={e.place.id} p={e.place} n={e.no + 1} tag={tagOf(e.place)} color={inAll ? groupOf(trip, e.place.group)?.color : viewColor} next={next} only={only} paid={paidOf(e.place)} est={e.place.cost ? moneyShort(krwToBase(trip, e.place.cost), baseOf(trip)) : undefined}
                     onOpen={() => setEditId(e.place.id)}
                     onToggle={() => { haptic(); mutate(trip.id, (t) => { const x = t.days[di].items[e.index]; x.done = !x.done }) }} />
                 )
@@ -139,7 +157,7 @@ export default function PlanTab({ trip }: { trip: Trip }) {
           })}
         </Reorder.Group>
       )}
-      {line.length > 0 && day.items.length === 0 && (
+      {line.length > 0 && items.length === 0 && (
         <div className="empty slim">
           {tr('오늘의 여정이 아직 없습니다')}
           <div style={{ marginTop: 10 }}>
@@ -154,13 +172,13 @@ export default function PlanTab({ trip }: { trip: Trip }) {
           <Camera size={18} />{tr('사진으로 추가')}
           <input type="file" accept="image/*,application/pdf" multiple hidden onChange={(e) => { const f = [...(e.target.files ?? [])]; e.target.value = ''; if (f.length) setPhotos(f) }} />
         </label>
-        <button className="btn btn-ghost sq" onClick={() => setStay(nightStay(trip, day.date) ?? { checkIn: day.date < trip.end ? day.date : trip.days[Math.max(0, di - 1)].date })} aria-label={tr('숙소')}><BedDouble size={18} /><span className="wide-only">{tr('숙소')}</span></button>
+        <button className="btn btn-ghost sq" onClick={() => setStay(nightStay(trip, day.date, gv === ALL ? undefined : gv) ?? { checkIn: day.date < trip.end ? day.date : trip.days[Math.max(0, di - 1)].date })} aria-label={tr('숙소')}><BedDouble size={18} /><span className="wide-only">{tr('숙소')}</span></button>
         <button className="btn btn-ghost sq" onClick={() => setFlight('new')} aria-label={tr('항공편 추가')}><Plane size={18} /><span className="wide-only">{tr('항공편')}</span></button>
       </div>
-      {day.items.length > 1 && (
+      {items.length > 1 && (
         <div className="tools">
-          <button className="btn btn-quiet" onClick={() => { mutate(trip.id, (t) => { t.days[di].items = shortest(t.days[di].items); retime(t.days[di].items) }); toast(tr('가까운 순서로 다시 이었습니다')) }}><Route size={16} />{tr('가까운 순으로 정리')}</button>
-          <button className="btn btn-quiet" onClick={() => { mutate(trip.id, (t) => retime(t.days[di].items)); toast(tr('이동 시간을 넣어 시각을 다시 맞췄습니다')) }}><Clock size={16} />{tr('시각 다시 맞추기')}</button>
+          <button className="btn btn-quiet" onClick={() => { mutate(trip.id, (t) => { const mine = slots.map(([, i]) => t.days[di].items[i]); const next = shortest(mine); retime(next); putBack(t, next) }); toast(tr('가까운 순서로 다시 이었습니다')) }}><Route size={16} />{tr('가까운 순으로 정리')}</button>
+          <button className="btn btn-quiet" onClick={() => { mutate(trip.id, (t) => retime(slots.map(([, i]) => t.days[di].items[i]))); toast(tr('이동 시간을 넣어 시각을 다시 맞췄습니다')) }}><Clock size={16} />{tr('시각 다시 맞추기')}</button>
         </div>
       )}
 
@@ -175,7 +193,7 @@ export default function PlanTab({ trip }: { trip: Trip }) {
   )
 }
 
-function PlaceRow({ p, n, next, only, onOpen, onToggle, paid, est }: { p: Place; n: number; next?: LL; only: boolean; onOpen: () => void; onToggle: () => void; paid?: string; est?: string }) {
+function PlaceRow({ p, n, next, only, onOpen, onToggle, paid, est, tag, color }: { p: Place; n: number; next?: LL; only: boolean; onOpen: () => void; onToggle: () => void; paid?: string; est?: string; tag?: Group; color?: string }) {
   const controls = useDragControls()
   const c = CATEGORY[p.category]
   return (
@@ -183,7 +201,7 @@ function PlaceRow({ p, n, next, only, onOpen, onToggle, paid, est }: { p: Place;
       whileDrag={{ scale: 1.02, zIndex: 5 }} onDragStart={() => haptic(10)}>
       <div className="tl-time">{p.time ?? ''}</div>
       <div className="tl-rail">
-        <button className={`tl-node${p.done ? ' done' : ''}`} onClick={onToggle} aria-label={`${p.name} ${p.done ? tr('다녀옴 취소') : tr('다녀옴으로 표시')}`}>
+        <button className={`tl-node${p.done ? ' done' : ''}`} style={color && !p.done ? { background: color } : undefined} onClick={onToggle} aria-label={`${p.name} ${p.done ? tr('다녀옴 취소') : tr('다녀옴으로 표시')}`}>
           {p.done ? <Check size={15} strokeWidth={3} /> : n}
         </button>
       </div>
@@ -192,6 +210,7 @@ function PlaceRow({ p, n, next, only, onOpen, onToggle, paid, est }: { p: Place;
           <button className="card-main" onClick={onOpen}>
             <h3>{tx(p.name)}</h3>
             <div className="sub">
+              <GroupTag g={tag} />
               <span className="cat" style={{ color: c.color }}>{c.label}</span>
               {p.duration ? <span>{fmtDur(p.duration)}</span> : null}
               {paid ? <span className="paid">{paid}</span> : est ? <span>{tr('1인 약 {0}', est)}</span> : null}
@@ -211,7 +230,7 @@ export function Hop({ from, to }: { from?: LL; to?: LL }) {
 }
 
 /** 항공편: 그 날 시각에 맞춰 장소 사이에 들어가고, 공항이 동선의 한 지점이 된다 */
-export function FlightRow({ e, next, only, onOpen }: { e: Extract<Entry, { kind: 'flight' }>; next?: LL; only: boolean; onOpen: () => void }) {
+export function FlightRow({ e, next, only, onOpen, tag }: { e: Extract<Entry, { kind: 'flight' }>; next?: LL; only: boolean; onOpen: () => void; tag?: Group }) {
   const f = e.flight
   const arriving = e.arriving
   const mins = flightMinutes(f)
@@ -221,7 +240,7 @@ export function FlightRow({ e, next, only, onOpen }: { e: Extract<Entry, { kind:
       <div className="tl-time">{e.time}</div>
       <div className="tl-rail"><span className="tl-node air"><Plane size={15} /></span></div>
       <div className="tl-body">
-        <p className="air-where">{arriving ? tr('{0} 도착', ap?.name ?? f.to) : tr('{0}에서 출발', ap?.name ?? f.from)}</p>
+        <p className="air-where"><GroupTag g={tag} />{tag ? ' ' : ''}{arriving ? tr('{0} 도착', ap?.name ?? f.to) : tr('{0}에서 출발', ap?.name ?? f.from)}</p>
         <button className="pass" onClick={onOpen} aria-label={tr('{0} 항공편 수정', f.flightNo)}>
           <div className="pass-route">
             <div><div className="code">{f.from}</div><div className="at">{f.depTime}</div></div>
@@ -246,7 +265,7 @@ export function FlightRow({ e, next, only, onOpen }: { e: Extract<Entry, { kind:
 }
 
 /** 숙소: 그 날 아침에 나서는 곳(위)과 밤에 돌아오는 곳(아래) */
-export function StayRow({ e, date, next, only, onOpen }: { e: Extract<Entry, { kind: 'stay-start' | 'stay-end' }>; date: string; next?: LL; only: boolean; onOpen: () => void }) {
+export function StayRow({ e, date, next, only, onOpen, tag }: { e: Extract<Entry, { kind: 'stay-start' | 'stay-end' }>; date: string; next?: LL; only: boolean; onOpen: () => void; tag?: Group }) {
   const s = e.stay
   const start = e.kind === 'stay-start'
   const total = dateRange(s.checkIn, s.checkOut).length - 1
@@ -263,7 +282,7 @@ export function StayRow({ e, date, next, only, onOpen }: { e: Extract<Entry, { k
       <div className="tl-rail"><span className="tl-node stay"><BedDouble size={15} /></span></div>
       <div className="tl-body">
         <button className="stay-card" onClick={onOpen} aria-label={tr('{0} 숙소 수정', s.name)}>
-          <span className="stay-kind">{title}</span>
+          <span className="stay-kind">{title}{tag && <> <GroupTag g={tag} /></>}</span>
           <b>{tx(s.name)}</b>
           <small>{sub}{s.code ? ` · ${tr('예약')} ${s.code}` : ''}</small>
         </button>
@@ -319,6 +338,9 @@ function AddPlaceSheet({ open, initial, onClose, trip, di }: { open: boolean; in
       const items = t.days[di].items
       const last = items[items.length - 1]
       if (last?.time) place.time = fromMin(Math.round((toMin(last.time) + (last.duration ?? 60) + travelMin(km(last, place))) / 10) * 10)
+      // 그룹 화면에서 넣으면 그 그룹의 일정
+      const g = currentGroup(trip.id)
+      if (g && !place.group) place.group = g
       items.push(place)
     })
     haptic()
@@ -472,6 +494,7 @@ function EditPlaceSheet({ trip, di, id, onClose, onMakeStay }: { trip: Trip; di:
       {d && (
         <div className="stack">
           <label className="field"><span>{tr('이름')}</span><input value={d.name} onChange={(e) => set({ name: e.target.value })} /></label>
+          <GroupPicker trip={trip} value={d.group} onChange={(g) => set({ group: g })} />
 
           <div className="field"><span>{tr('위치')}</span>
             <div className="input-btn">
@@ -542,7 +565,8 @@ function FlightSheet({ trip, flight, onClose }: { trip: Trip; flight?: Flight | 
 
   useEffect(() => {
     if (!flight) return
-    setLegs([editing ? { ...editing } : { depDate: trip.start, arrDate: trip.start }]); setCur(0); setRaw(''); setFound(undefined)
+    const g = currentGroup(trip.id)
+    setLegs([editing ? { ...editing } : { depDate: trip.start, arrDate: trip.start, ...(g ? { group: g } : {}) }]); setCur(0); setRaw(''); setFound(undefined)
   }, [flight]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const leg = legs[cur] ?? {}
@@ -555,7 +579,7 @@ function FlightSheet({ trip, flight, onClose }: { trip: Trip; flight?: Flight | 
     if (!text.trim()) { setFound(undefined); return }
     const parsed = parseFlightText(text, Number(trip.start.slice(0, 4)))
     setFound(parsed.length)
-    if (parsed.length) { setLegs(parsed); setCur(0) }
+    if (parsed.length) { const g = legs[0]?.group; setLegs(parsed.map((f) => (g ? { ...f, group: g } : f))); setCur(0) }
   }
 
   const save = () => {
@@ -599,6 +623,7 @@ function FlightSheet({ trip, flight, onClose }: { trip: Trip; flight?: Flight | 
             {legs.map((l, i) => <button key={i} className="chip" aria-pressed={i === cur} onClick={() => setCur(i)}>{l.flightNo ?? tr('구간 {0}', i + 1)}{isComplete(l) && <Check size={14} />}</button>)}
           </div>
         )}
+        <GroupPicker trip={trip} value={leg.group} onChange={(g) => setLegs((ls) => ls.map((l) => ({ ...l, group: g })))} />
         <label className="field"><span>{tr('항공편 번호')}{leg.flightNo && airlineOf(leg.flightNo) ? ` · ${airlineOf(leg.flightNo)}` : ''}</span>
           <input value={leg.flightNo ?? ''} onChange={(e) => set({ flightNo: e.target.value.toUpperCase() })} placeholder="KE703" autoCapitalize="characters" />
         </label>

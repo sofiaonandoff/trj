@@ -565,3 +565,10 @@ button { cursor: pointer; border: 0; background: none; padding: 0; }
 .widget-more summary { cursor: pointer; font-weight: 600; font-size: 14px; padding: 6px 0; }
 .widget-formula { justify-content: flex-start; gap: 8px; margin-top: 6px; }
 .widget-formula code { font-size: 12px; color: var(--mute); }
+
+/* 그룹 */
+.group-tabs { padding: 2px 16px 10px; overflow-x: auto; flex-wrap: nowrap; }
+.group-tabs .chip { flex: none; }
+.chip .dot, .gtag .dot { width: 8px; height: 8px; display: inline-block; margin-right: 6px; vertical-align: 1px; }
+.gtag { font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; }
+.group-sum .dot { margin-right: 8px; }

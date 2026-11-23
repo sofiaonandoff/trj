@@ -7,6 +7,7 @@ import { putFlight, useStore } from '../store'
 import type { Trip } from '../types'
 import { Sheet } from './ui'
 import { airport } from '../data/airports'
+import { currentGroup } from '../lib/groups'
 
 interface Job { id: number; url: string; status: 'reading' | 'done' | 'error'; stage?: string; results: (Applied & { undone?: boolean; picked?: Record<string, string> })[]; error?: string }
 
@@ -38,7 +39,7 @@ export default function PhotoImport({ trip, files, current, onClose, onGo }: { t
             const drafts = await readTripPhoto(b.f, tripRef.current, current, (stage) => { if (alive) set(b.job.id, { stage }) })
             if (!alive) return
             const results: Applied[] = []
-            mutate(trip.id, (t) => { for (const d of drafts) results.push(applyDraft(t, d, putFlight)) })
+            mutate(trip.id, (t) => { for (const d of drafts) results.push(applyDraft(t, d, putFlight, currentGroup(trip.id))) })
             set(b.job.id, { status: 'done', results })
           } catch (e) {
             if (alive) set(b.job.id, { status: 'error', error: (e as Error).message || tr('사진을 읽지 못했습니다') })

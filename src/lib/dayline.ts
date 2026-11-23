@@ -16,7 +16,7 @@ import { km } from './util'
 
 export type Entry =
   | { kind: 'stay-start'; stay: Stay; checkout: boolean }
-  | { kind: 'place'; place: Place; index: number }
+  | { kind: 'place'; place: Place; index: number; /** 이 화면에서 몇 번째 (그룹 화면에서는 보이는 것만 센다) */ no: number }
   | { kind: 'flight'; flight: Flight; arriving: boolean; time: string; from?: Airport; to?: Airport }
   | { kind: 'stay-end'; stay: Stay; checkin: boolean }
   | { kind: 'stay-missing' }
@@ -29,36 +29,52 @@ export const GROUND_KM = 300
 export const DEFAULT_IN = '15:00'
 export const DEFAULT_OUT = '11:00'
 
+/** 그룹 화면에 보일 것인가: view가 없거나 'all'이면 모두, 그룹이면 모두의 것과 그 그룹의 것 */
+const vis = (view: string | undefined, x: { group?: string }) => !view || view === 'all' || !x.group || x.group === view
+/** 그룹 화면이면 그 그룹 숙소를, 없으면 모두의 숙소를. 전체 화면이면 겹치는 숙소를 모두 (그룹마다 다른 숙소) */
+function pickStays(list: Stay[], view?: string): Stay[] {
+  if (!list.length) return []
+  if (view && view !== 'all') { const own = list.find((s) => s.group === view); return [own ?? list.find((s) => !s.group) ?? list[0]] }
+  if (view === 'all') { const seen = new Set<string>(); return list.filter((s) => { const k = s.group ?? ''; if (seen.has(k)) return false; seen.add(k); return true }) }
+  return [list[0]]
+}
+const morningStays = (trip: Trip, date: string, view?: string) => pickStays((trip.stays ?? []).filter((s) => s.checkIn < date && date <= s.checkOut && vis(view, s)), view)
+const nightStays = (trip: Trip, date: string, view?: string) => pickStays((trip.stays ?? []).filter((s) => s.checkIn <= date && date < s.checkOut && vis(view, s)), view)
 /** 그 날 아침에 일어나는 숙소 (전날 밤 묵은 곳) */
-export const morningStay = (trip: Trip, date: string) => (trip.stays ?? []).find((s) => s.checkIn < date && date <= s.checkOut)
+export const morningStay = (trip: Trip, date: string, view?: string) => morningStays(trip, date, view)[0] as Stay | undefined
 /** 그 날 밤 묵는 숙소 */
-export const nightStay = (trip: Trip, date: string) => (trip.stays ?? []).find((s) => s.checkIn <= date && date < s.checkOut)
+export const nightStay = (trip: Trip, date: string, view?: string) => nightStays(trip, date, view)[0] as Stay | undefined
 
 /** 밤을 비행기에서 보내거나 여행이 끝나는 날이면 숙소가 필요 없다 */
-function needsNight(trip: Trip, date: string) {
+function needsNight(trip: Trip, date: string, view?: string) {
   if (date >= trip.end) return false
-  return !trip.flights.some((f) => f.depDate === date && f.arrDate > date)
+  return !trip.flights.some((f) => f.depDate === date && f.arrDate > date && vis(view, f))
 }
 
-export function dayLine(trip: Trip, date: string): Entry[] {
+/**
+ * view: 없으면 예전처럼 모두, 'all'이면 그룹 일정까지 모두 (그룹마다 다른 숙소도 함께), 그룹 id면 모두의 일정 + 그 그룹 일정
+ */
+export function dayLine(trip: Trip, date: string, view?: string): Entry[] {
   const day = trip.days.find((d) => d.date === date)
   const items = day?.items ?? []
   const out: Entry[] = []
 
-  const morning = morningStay(trip, date)
+  for (const morning of morningStays(trip, date, view)) {
   // 밤새 날아와 아침에 내리는 날은 숙소에서 시작하지 않는다.
   // 단, 그 비행기가 이 숙소가 있는 도시에서 숙박 기간 중에 떠난 경우만이다. 그렇지 않으면(다른 곳에서 떠난 편,
   // 도착일이 잘못 들어간 편) 사용자가 직접 넣은 숙소를 믿고 체크아웃을 보여 준다
-  const leftOvernight = morning && trip.flights.some((f) => {
-    if (f.arrDate !== date || f.depDate >= date || f.depDate < morning.checkIn) return false
+  const leftOvernight = trip.flights.some((f) => {
+    if (!vis(view, f) || f.arrDate !== date || f.depDate >= date || f.depDate < morning.checkIn) return false
     const a = airport(f.from)
     return !a || km(a, morning) <= GROUND_KM
   })
-  if (morning && !leftOvernight) out.push({ kind: 'stay-start', stay: morning, checkout: morning.checkOut === date })
+  if (!leftOvernight) out.push({ kind: 'stay-start', stay: morning, checkout: morning.checkOut === date })
+  }
 
   // 항공편: 그 날 출발하는 편은 출발 시각에, 전날 떠나 그 날 도착하는 편은 도착 시각에
   const flights: Extract<Entry, { kind: 'flight' }>[] = []
   for (const f of trip.flights) {
+    if (!vis(view, f)) continue
     if (f.depDate === date) flights.push({ kind: 'flight', flight: f, arriving: false, time: f.depTime, from: airport(f.from), to: airport(f.to) })
     else if (f.arrDate === date) flights.push({ kind: 'flight', flight: f, arriving: true, time: f.arrTime, from: airport(f.from), to: airport(f.to) })
   }
@@ -66,18 +82,18 @@ export function dayLine(trip: Trip, date: string): Entry[] {
 
   // 장소의 시각: 정해진 시각이 없으면 앞 장소의 시각을 이어받는다
   let eff = '00:00'
-  const placed = items.map((place, index) => { eff = place.time ?? eff; return { place, index, eff } })
+  const placed = items.map((place, index) => { eff = place.time ?? eff; return { place, index, eff } }).filter((p) => vis(view, p.place))
   let fi = 0
-  for (const p of placed) {
+  placed.forEach((p, no) => {
     // 이 장소보다 먼저인 항공편을 앞에 넣는다
     while (fi < flights.length && flights[fi].time < p.eff) out.push(flights[fi++])
-    out.push({ kind: 'place', place: p.place, index: p.index })
-  }
+    out.push({ kind: 'place', place: p.place, index: p.index, no })
+  })
   while (fi < flights.length) out.push(flights[fi++])
 
-  const night = nightStay(trip, date)
-  if (night) out.push({ kind: 'stay-end', stay: night, checkin: night.checkIn === date })
-  else if (needsNight(trip, date)) out.push({ kind: 'stay-missing' })
+  const nights = nightStays(trip, date, view)
+  for (const night of nights) out.push({ kind: 'stay-end', stay: night, checkin: night.checkIn === date })
+  if (!nights.length && needsNight(trip, date, view)) out.push({ kind: 'stay-missing' })
   return out
 }
 
@@ -141,4 +157,18 @@ export function routeSegments(line: Entry[]): [number, number][][] {
   }
   if (cur.length > 1) segs.push(cur)
   return segs
+}
+
+/**
+ * 그룹 색으로 그린 동선. 전체 화면에서 그룹별 일정이 있는 날은 그룹마다 제 색으로,
+ * 그룹 화면은 그 그룹 색으로. 그룹이 없거나 모두 함께인 날은 undefined (기본 색)
+ */
+export function groupRoutes(trip: Trip, date: string, view: string | undefined, line: Entry[]): { color: string; segs: [number, number][][] }[] | undefined {
+  const groups = trip.groups ?? []
+  if (!groups.length || !view) return undefined
+  if (view !== 'all') { const g = groups.find((x) => x.id === view); return g ? [{ color: g.color, segs: routeSegments(line) }] : undefined }
+  const day = trip.days.find((d) => d.date === date)
+  const split = Boolean(day?.items.some((p) => p.group)) || (trip.stays ?? []).some((x) => x.group && x.checkIn <= date && x.checkOut >= date)
+    || trip.flights.some((f) => f.group && (f.depDate === date || f.arrDate === date))
+  return split ? groups.map((g) => ({ color: g.color, segs: routeSegments(dayLine(trip, date, g.id)) })) : undefined
 }

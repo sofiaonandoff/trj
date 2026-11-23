@@ -1,11 +1,12 @@
 import { tr } from '../i18n'
-import { Check, Link2, Mail, Pencil, UserPlus, Users, X } from 'lucide-react'
+import { Check, Link2, Mail, Pencil, Plus, UserPlus, Users, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { driveConfigured, ensureToken, inviteByEmail, joinLink, listEditors, removeEditor, startSharing, tokenValid, useDriveStatus, type Editor } from '../lib/drive'
 import { mergePeople, type Person as PersonOf } from '../lib/people'
 import { uid } from '../lib/util'
 import { MEMBER_COLORS, useStore } from '../store'
-import type { Trip } from '../types'
+import type { Group, Trip } from '../types'
+import { dropMemberFromGroups, newGroup, removeGroup } from '../lib/groups'
 import { Avatar, Sheet, copy, toast } from './ui'
 import InviteSend from './InviteSend'
 import type { Invitee } from '../lib/invite'
@@ -81,6 +82,7 @@ export default function Companions({ trip, open, onClose, invites }: { trip: Tri
       t.members = t.members.filter((x) => x.id !== m.id)
       t.expenses.forEach((x) => { x.split = x.split.filter((id) => id !== m.id); if (!x.split.length) x.split = [t.members[0].id] })
       t.checklist.forEach((c) => { if (c.assignee === m.id) c.assignee = undefined })
+      dropMemberFromGroups(t, m.id)
     })
     await refresh()
     toast(p.editor && p.editor.role !== 'owner' ? tr('{0} 님을 빼고 편집 권한도 거뒀습니다', m?.name ?? p.editor.name ?? p.editor.email ?? '') : tr('{0} 님을 뺐습니다', m?.name ?? ''))
@@ -174,7 +176,73 @@ export default function Companions({ trip, open, onClose, invites }: { trip: Tri
           <button className="btn btn-ghost btn-block" onClick={() => copy(joinLink(fileId), tr('초대 링크를 복사했습니다'))}><Link2 size={18} />{tr('초대 링크 복사')}</button>
         )}
         {role && !live && <p className="hint">{tr('지금은 Drive에 연결되어 있지 않아 편집 권한을 확인할 수 없습니다. 위쪽 저장 상태 버튼으로 다시 연결하세요.')}</p>}
+        {trip.members.length > 1 && <Groups trip={trip} />}
       </div>
     </Sheet>
+  )
+}
+
+/**
+ * 따로 다니는 그룹: 같은 여행 안에서 며칠 동안 나뉘어 움직일 때 쓴다.
+ * 그룹을 만들면 일정 탭에 전체 / 그룹 탭이 생기고, 지출을 나눌 사람 기본값이 그 그룹 사람들이 된다.
+ */
+function Groups({ trip }: { trip: Trip }) {
+  const mutate = useStore((s) => s.mutate)
+  const groups = trip.groups ?? []
+  /** 만들거나 고치는 중인 그룹 (id가 없으면 새 그룹) */
+  const [d, setD] = useState<{ id?: string; name: string; members: string[] }>()
+  const nameOf = (id: string) => trip.members.find((m) => m.id === id)?.name
+  const toggle = (id: string) => setD((x) => x && { ...x, members: x.members.includes(id) ? x.members.filter((m) => m !== id) : [...x.members, id] })
+  const save = () => {
+    if (!d) return
+    const name = d.name.trim()
+    if (!name) { toast(tr('그룹 이름을 넣으세요')); return }
+    if (!d.members.length) { toast(tr('그룹에 넣을 사람을 고르세요')); return }
+    if (groups.some((g) => g.name === name && g.id !== d.id)) { toast(tr('같은 이름의 그룹이 이미 있습니다')); return }
+    mutate(trip.id, (t) => {
+      if (d.id) { const g = t.groups?.find((x) => x.id === d.id); if (g) { g.name = name; g.members = d.members } }
+      else (t.groups ??= []).push(newGroup(t, name, d.members))
+    })
+    toast(d.id ? tr('그룹을 고쳤습니다') : tr('{0} 그룹을 만들었습니다. 일정 탭 위에서 그룹별로 볼 수 있습니다', name))
+    setD(undefined)
+  }
+  const drop = (g: Group) => {
+    if (!confirm(tr('{0} 그룹을 지울까요? 이 그룹 일정은 모두의 일정으로 바뀝니다', g.name))) return
+    mutate(trip.id, (t) => removeGroup(t, g.id))
+    toast(tr('{0} 그룹을 지웠습니다', g.name))
+  }
+
+  return (
+    <div className="field"><span>{tr('따로 다니는 그룹')}</span>
+      {groups.length > 0 && (
+        <div className="list people">
+          {groups.map((g) => (
+            <div key={g.id} className="person-row">
+              <span className="avatar" style={{ background: g.color }} aria-hidden="true">{g.name.slice(0, 1)}</span>
+              <span className="grow"><b>{g.name}</b><small>{g.members.map(nameOf).filter(Boolean).join(', ')}</small></span>
+              <button className="icon-btn" onClick={() => setD({ id: g.id, name: g.name, members: [...g.members] })} aria-label={tr('{0} 그룹 고치기', g.name)}><Pencil size={16} /></button>
+              <button className="icon-btn" onClick={() => drop(g)} aria-label={tr('{0} 그룹 지우기', g.name)}><X size={18} /></button>
+            </div>
+          ))}
+        </div>
+      )}
+      {d ? (
+        <div className="stack" style={{ marginTop: 8 }}>
+          <input className="input" autoFocus placeholder={tr('예: 끄라비팀')} value={d.name} onChange={(e) => setD({ ...d, name: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && save()} />
+          <div className="chips">
+            {trip.members.map((m) => <button type="button" key={m.id} className="chip" aria-pressed={d.members.includes(m.id)} onClick={() => toggle(m.id)}>{m.name}</button>)}
+          </div>
+          <div className="row">
+            <button className="btn btn-ghost" onClick={() => setD(undefined)}>{tr('취소')}</button>
+            <button className="btn btn-primary" onClick={save}>{d.id ? tr('변경 내용 저장') : tr('그룹 만들기')}</button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <button className="btn btn-ghost btn-block" style={{ marginTop: groups.length ? 8 : 0 }} onClick={() => setD({ name: '', members: [] })}><Plus size={18} />{tr('그룹 만들기')}</button>
+          {!groups.length && <small className="hint" style={{ marginTop: 6 }}>{tr('며칠 동안 나뉘어 다닌다면 그룹을 만드세요. 일정은 그룹별로 보이고, 지출은 그 그룹 사람끼리 나눕니다.')}</small>}
+        </>
+      )}
+    </div>
   )
 }

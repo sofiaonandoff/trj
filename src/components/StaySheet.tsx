@@ -1,4 +1,6 @@
 import { tr } from '../i18n'
+import { currentGroup } from '../lib/groups'
+import GroupPicker from './GroupPicker'
 import CurrencySelect from './CurrencySelect'
 import { BedDouble, Copy, MapPin, Search, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
@@ -41,7 +43,8 @@ export default function StaySheet({ trip, stay, onClose }: { trip: Trip; stay?: 
       const legEnd = trip.legs?.find((l) => stay.checkIn >= l.start && stay.checkIn <= l.end)?.end
       const next = (trip.stays ?? []).map((s) => s.checkIn).filter((x) => x > stay.checkIn).sort()[0]
       const out = [next, legEnd, trip.end].filter(Boolean).filter((x) => x! > stay.checkIn).sort()[0] ?? addDays(stay.checkIn, 1)
-      setD({ id: uid(), name: stay.name ?? '', lat: stay.lat ?? leg.lat, lng: stay.lng ?? leg.lng, checkIn: stay.checkIn, checkOut: out, inTime: DEFAULT_IN, outTime: DEFAULT_OUT })
+      const g = currentGroup(trip.id)
+      setD({ id: uid(), name: stay.name ?? '', lat: stay.lat ?? leg.lat, lng: stay.lng ?? leg.lng, checkIn: stay.checkIn, checkOut: out, inTime: DEFAULT_IN, outTime: DEFAULT_OUT, ...(g ? { group: g } : {}) })
       setCost(''); setCurrency('KRW')
     }
     setQ(''); setResults(undefined); setPinned('id' in stay || stay.lat !== undefined); setSaving(false)
@@ -109,6 +112,7 @@ export default function StaySheet({ trip, stay, onClose }: { trip: Trip; stay?: 
             </span>
           </div>
 
+          <GroupPicker trip={trip} value={d.group} onChange={(g) => set({ group: g })} />
           <label className="field"><span>{tr('숙소 이름')}</span>
             <input value={d.name} placeholder={tr('예: 아바니 리버사이드 방콕')} onChange={(e) => { set({ name: e.target.value }); setQ(e.target.value) }} />
           </label>
