@@ -187,6 +187,11 @@ export function findStayInfo(lines: string[]): { name?: string; city?: string; a
     // 도시: 'More Hotels in Sydney', 'Hotels in Bangkok', '시드니의 다른 숙소'
     const c = l.match(/\b(?:hotels?|stays?|properties|homes?)\s+in\s+([A-Z][\p{L} .'-]{1,30})$/iu) ?? l.match(/([\p{L}]{2,20})(?:의)?\s*(?:다른\s*)?(?:숙소|호텔)\s*더\s*보기/u)
     if (c && !out.city) out.city = c[1].trim()
+    // 객실 선택 화면: 머리글 다음 줄이 객실 이름 ('객실 선택' / 'Biggy King Bunk')
+    if (/^\W*(?:객실\s*선택|select\s*(?:a\s*)?room|choose\s*(?:your\s*)?room)\s*$/i.test(l) && !out.room) {
+      const n = clean(lines[i + 1] ?? '')
+      if (/^[\p{L}][\p{L}\d .'&()/-]{3,40}$/u.test(n) && !/환불|선택|취소|refund|cancel/i.test(n)) out.room = n
+    }
     // 객실: 'Studio Superior', '디럭스 더블룸'
     const r = l.match(/(?:^|\s)((?:(?:studio|superior|deluxe|standard|premier|executive|family|junior|grand)\s+)*(?:studio|superior|deluxe|standard|suite|double|twin|king|queen|single|room|dorm)(?:\s+(?:room|suite|double|twin|king|queen|view|city|ocean|river|with\s+[\w ]+))*|[가-힣]*(?:디럭스|스탠다드|슈페리어|스위트|트윈|더블|싱글|패밀리)[가-힣 ]*룸?)\s*$/i)
     if (r && !out.room && r[1].length >= 5 && !/^room$/i.test(r[1])) out.room = r[1].trim()
@@ -234,7 +239,11 @@ export function findDates(text: string, year: number): string[] {
   for (const m of t.matchAll(/(\d{4})\s*[-./년]\s*(\d{1,2})\s*[-./월]\s*(\d{1,2})/g)) push(+m[1], +m[2], +m[3])
   // '2027년 2월 12일'의 '년'을 4·L로 읽은 것: 20274 2월 12일, 2027L 2월 12일
   for (const m of t.matchAll(/(?<!\d)(20\d{2})(?:4|[Ll'’|])\s*(\d{1,2})\s*월\s*(\d{1,2})\s*일/g)) push(+m[1], +m[2], +m[3])
+  // 앱 예약 화면의 짧은 연도 표기: 27.2.12 - 27.2.13 (연.월.일). 여행 연도와 맞으면 이것으로 읽는다
+  const yy = (a: string) => Math.abs(2000 + Number(a) - year) <= 1
+  for (const m of t.matchAll(/(?<![\d.])(\d{2})\.\s?(\d{1,2})\.\s?(\d{1,2})(?![\d.])/g)) if (yy(m[1])) push(2000 + +m[1], +m[2], +m[3])
   for (const m of t.matchAll(/(?<![\d.])(\d{1,2})[./-](\d{1,2})[./-](\d{4}|\d{2})(?![\d])/g)) {
+    if (/^\d{1,2}\.\d{1,2}\.\d{1,2}$/.test(m[0].replace(/\s/g, '')) && yy(m[1]) && valid(2000 + +m[1], +m[2], +m[3])) continue
     // 일/월/년이 흔하지만 월/일/년일 수도 있다: 둘 다 후보로 둔다
     push(+m[3], +m[2], +m[1]); push(+m[3], +m[1], +m[2])
   }
@@ -287,7 +296,7 @@ export function findDateRange(text: string, year: number): [string, string] | un
 
 /** 여행 기간 안의 날짜가 있으면 그것을, 없으면 처음 찾은 날짜를 돌려준다 */
 const DATE_LABEL = /체크\s*인|check[\s-]*in|이용\s*일|방문\s*일|관람\s*일|visit(?:ing)?\s*date|travel\s*date|date\s*of\s*visit|출발|departure|탑승일|日付|ご利用日|วันที่/i
-const NOT_DATE_LABEL = /체크\s*아웃|check[\s-]*out|예약\s*일|결제\s*일|booked\s*on|booking\s*date|발행|issued|만료|expir/i
+const NOT_DATE_LABEL = /환불|취소|cancel|refund|까지|체크\s*아웃|check[\s-]*out|예약\s*일|결제\s*일|booked\s*on|booking\s*date|발행|issued|만료|expir/i
 
 export function pickTripDate(text: string, days: string[]): string | undefined {
   setDateRef(days)
@@ -356,7 +365,7 @@ function parsePlain(s: string): number | undefined {
   return Number.isFinite(n) && n > 0 ? n : undefined
 }
 
-const TOTAL = /^[^\p{L}\d]*금\s*액|grand\s*total|t[o0]ta[l1i]|^\s*총\b|결제\s*완료|payment\s*complete|\bpaid\b|카드\s*결제|신용\s*카드|paid\s*by|card\s*payment|amount\s*(due|paid)?|balance|합\s*계|총\s*(액|금액|결제)|결제\s*금액|받을\s*금액|청구\s*금액|合\s*計|お会計|ご請求|総額|รวม(ทั้งสิ้น|เงิน)?|ยอดรวม|ยอดสุทธิ|tổng|montant|summe|totale/iu
+const TOTAL = /[\d,]\s*원?\s*예약(?:하기)?\s*$|reserve\s*$|book\s*now|^[^\p{L}\d]*금\s*액|grand\s*total|t[o0]ta[l1i]|^\s*총\b|결제\s*완료|payment\s*complete|\bpaid\b|카드\s*결제|신용\s*카드|paid\s*by|card\s*payment|amount\s*(due|paid)?|balance|합\s*계|총\s*(액|금액|결제)|결제\s*금액|받을\s*금액|청구\s*금액|合\s*計|お会計|ご請求|総額|รวม(ทั้งสิ้น|เงิน)?|ยอดรวม|ยอดสุทธิ|tổng|montant|summe|totale/iu
 const NOT_TOTAL = /sub\s*total|소계|vat|tax|세액|부가세|change|거스름|잔돈|お釣|ทอน|discount|할인|cash\s*tendered|받은\s*금액/i
 
 /** 합계 줄의 금액을 찾는다. 없으면 통화 기호가 붙은 가장 큰 금액 */
@@ -368,7 +377,7 @@ export function findTotal(lines: string[]): number | undefined {
 }
 
 const KINDS: { re: RegExp; cat: Category; exp: ExpenseCategory; costOnly?: boolean }[] = [
-  { re: /hotel|hostel|resort|check[\s-]?in|check[\s-]?out|\b\d+\s*(?:x\s*)?rooms?\b|add rooms|\b\d+\s*nights?\b|객실\s*\d|\d\s*박\b|호텔|숙박|숙소|체크\s*인|호스트|에어비앤비|리조트|게스트하우스|ホテル|旅館|โรงแรม|airbnb|agoda|booking\.com|게스트\s*\d+\s*명|\d+\s*guests?\b|저택|호실|별채|펜션|민박|빌라|콘도|아파트|단독\s*주택|공동\s*주택|집\s*전체|개인실|게스트용|타운하우스|캐빈|오두막|entire\s+(home|place|rental)|guest\s*suite|guesthouse|private\s+room|room\s+in|apartment|condo|villa|cottage|cabin|bungalow|townhouse|loft/i, cat: 'stay', exp: 'stay' },
+  { re: /객실\s*선택|(?:킹|퀸|더블|트윈|싱글|이층)\s*침대|침대\s*\d|[\d,]\s*~?\s*\/\s*박|select\s*(?:a\s*)?room|bunk|king\s*bed|queen\s*bed|hotel|hostel|resort|check[\s-]?in|check[\s-]?out|\b\d+\s*(?:x\s*)?rooms?\b|add rooms|\b\d+\s*nights?\b|객실\s*\d|\d\s*박\b|호텔|숙박|숙소|체크\s*인|호스트|에어비앤비|리조트|게스트하우스|ホテル|旅館|โรงแรม|airbnb|agoda|booking\.com|게스트\s*\d+\s*명|\d+\s*guests?\b|저택|호실|별채|펜션|민박|빌라|콘도|아파트|단독\s*주택|공동\s*주택|집\s*전체|개인실|게스트용|타운하우스|캐빈|오두막|entire\s+(home|place|rental)|guest\s*suite|guesthouse|private\s+room|room\s+in|apartment|condo|villa|cottage|cabin|bungalow|townhouse|loft/i, cat: 'stay', exp: 'stay' },
   { re: /taxi|grab|bolt|uber|bts|mrt|metro|subway|railway|train|bus|ferry|택시|지하철|버스|기차|열차|교통|suica|pasmo|タクシー|電車|แท็กซี่|รถไฟ/i, cat: 'sight', exp: 'move', costOnly: true },
   { re: /\bspa\b|스파|온천|hot\s*pools?|sauna|사우나|찜질|massage|마사지|onsen|温泉/i, cat: 'relax', exp: 'play' },
   { re: /cafe|café|coffee|starbucks|카페|커피|喫茶|カフェ|กาแฟ|bakery|베이커리/i, cat: 'cafe', exp: 'food' },
@@ -700,7 +709,19 @@ export function readText(all: OcrLine[], days: string[], tripCurrency: string): 
   if (kind?.cat === 'stay') { const p = findStayInfo(promo); info.city ??= p.city; info.room ??= p.room }
   // 숙소 이름: 화면에 숙소 이름이 없는 예약 확인 화면(아고다 등)이면 머리말 대신 'Sydney 숙소'처럼 도시로
   const hotelLine = body.map((l) => l.text).find((t) => /hotel|resort|\binn\b|suites?\b|hostel|apartments?\b|호텔|리조트|ホテル/i.test(t) && !/hotels?\s+in\b|book another|호텔\s*더/i.test(t) && t.length <= 48)
-  const stayName = kind?.cat === 'stay' ? info.name ?? (hotelLine ? stripLeadJunk(hotelLine.replace(/^[^\p{L}\p{N}]+/u, '').trim()) : undefined) ?? (info.city ? tr('{0} 숙소', info.city) : undefined) : undefined
+  // 숙소 앱 상세 화면의 맨 위 제목 줄 ('< ⌂ 아사이 방콕 차이나타운 ⇪ 🔖'): 아이콘 찌꺼기 사이의 가장 긴 글자 덩어리
+  const titleName = (() => {
+    if (kind?.cat !== 'stay') return undefined
+    // '<' 뒤로 가기가 있는 제목 줄은 브라우저 줄로 빠지므로 body가 아닌 전체 줄에서 찾는다
+    const top = lines.filter((l) => l.top <= maxTop * 0.14 && !statusBar(l)).map((l) => l.text)
+    for (const t of top) {
+      const runs = (t.match(/[\p{L}][\p{L}\d .'&-]*[\p{L}\d]/gu) ?? []).map((x) => x.trim()).filter((x) => (x.match(/\p{L}/gu) ?? []).length >= 4)
+      const best = runs.sort((x, y) => y.length - x.length)[0]
+      if (best && !/^(객실|스테이|리뷰|예약|결제|숙소)(\s*(정보|선택|소개))?$|^(select\s*)?rooms?$|^reviews?$|^overview$|^details?$/i.test(best) && !/\b(am|pm)\b|all\b/i.test(best)) return best
+    }
+    return undefined
+  })()
+  const stayName = kind?.cat === 'stay' ? info.name ?? (hotelLine ? stripLeadJunk(hotelLine.replace(/^[^\p{L}\p{N}]+/u, '').trim()) : undefined) ?? titleName ?? (info.city ? tr('{0} 숙소', info.city) : undefined) : undefined
   const stay = kind?.cat === 'stay' ? stayOf(body.map((l) => l.text), days) : undefined
   const tour = tourPage ? readTour(body.map((l) => l.text)) : undefined
   return {
