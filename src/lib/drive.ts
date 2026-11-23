@@ -5,6 +5,7 @@ import type { DriveLink, Trip } from '../types'
 import { mergeTrips, sameContent, shared } from './merge'
 import { viewOf } from './share'
 import { getPhoto, putPhoto, removePhoto, setRemotePhotoFetcher } from './photos'
+import { dismissed, groupByTrip, pickCanonical, removable, type TripFile } from './driveFiles'
 
 /**
  * Google Drive 동기화. 서버 없이 브라우저가 사용자의 Drive에 직접 읽고 쓴다.
@@ -221,8 +222,85 @@ function mergeIntoLocal(remote: Trip, link: Partial<DriveLink>) {
   return { merged, differsFromRemote }
 }
 
+/* ── 기기마다 따로 생긴 파일 합치기 ── */
+/*
+ * 같은 여행이 Drive에 여러 파일로 있을 수 있다: 다른 기기가 이 여행의 파일을 모른 채 새로 올렸거나,
+ * 예전 버전에서 기기마다 따로 만든 경우. 같은 여행 id(trjTripId)의 파일을 모두 받아 한 여행으로 합치고,
+ * 모든 기기·동행이 같은 파일(pickCanonical)을 쓰게 한 뒤, 내가 만든 공유되지 않은 사본은 휴지통으로 옮긴다.
+ */
+const FILE_FIELDS = 'id,version,createdTime,modifiedTime,shared,ownedByMe,appProperties'
+const trash = (fileId: string) => api(`${API}/files/${fileId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trashed: true }) })
+
+async function findTripFiles(tripId: string): Promise<TripFile[]> {
+  const q = encodeURIComponent(`appProperties has { key='trjTripId' and value='${tripId.replace(/'/g, '')}' } and trashed=false`)
+  const r = await api(`${API}/files?q=${q}&spaces=drive&pageSize=50&fields=files(${FILE_FIELDS})`)
+  return r.ok ? ((await r.json()).files as TripFile[]) : []
+}
+
+/** 이 앱이 볼 수 있는 모든 여행 파일 (내가 만든 것 + 초대받아 연 것) */
+async function listTripFiles(): Promise<TripFile[]> {
+  const q = encodeURIComponent(`mimeType='application/json' and trashed=false`)
+  const out: TripFile[] = []
+  let page: string | undefined
+  for (let i = 0; i < 5; i++) {
+    const r = await api(`${API}/files?q=${q}&spaces=drive&pageSize=200&fields=nextPageToken,files(${FILE_FIELDS})${page ? `&pageToken=${page}` : ''}`)
+    if (!r.ok) break
+    const j = (await r.json()) as { files: TripFile[]; nextPageToken?: string }
+    out.push(...j.files)
+    if (!(page = j.nextPageToken)) break
+  }
+  return out
+}
+
+/** 같은 여행의 파일들을 합쳐 이 기기에 두고 원본 파일에 잇는다. 합치거나 다시 이었으면 true */
+async function consolidate(tripId: string, known?: TripFile[]): Promise<boolean> {
+  const t = store().trips.find((x) => x.id === tripId)
+  const files = [...(known ?? await findTripFiles(tripId))]
+  // 초대받아 연 파일은 검색에 안 나올 수도 있어 따로 확인한다
+  const linked = t?.drive?.fileId
+  if (linked && !files.some((f) => f.id === linked)) { const m = await remoteMeta(linked); if (m && !m.trashed) files.push(m) }
+  if (!files.length) return false
+  const c = pickCanonical(files, linked, t?.drive?.role)
+  if (files.length === 1 && linked === c.id) return false
+
+  let merged: Trip | undefined = t
+  for (const f of files) {
+    const remote = await download(f.id).catch(() => null)
+    if (remote?.id === tripId) merged = merged ? mergeTrips(merged, remote) : { ...remote }
+  }
+  if (!merged) return false
+  const role = c.shared ? (c.ownedByMe === false ? 'editor' : 'owner') : t?.drive?.role
+  // 원본 하나뿐이고 이 기기에 없던 여행이면 받은 그대로라 다시 올릴 필요가 없다
+  const fresh = !t && files.length === 1
+  merged.drive = { ...t?.drive, fileId: c.id, version: fresh ? c.version : undefined, syncedAt: fresh ? (merged.updatedAt ?? merged.createdAt) : undefined, error: undefined, ...(role ? { role } : {}) }
+  store().put(merged)
+  await Promise.allSettled(removable(files, c).map((f) => trash(f.id)))
+  return true
+}
+
+/** 다른 기기에서 만든 여행을 이 기기로 가져오고, 여러 파일로 나뉜 여행을 합친다 (몇 분에 한 번) */
+let lastDiscover = 0
+async function discover() {
+  if (Date.now() - lastDiscover < 5 * 60_000) return 0
+  lastDiscover = Date.now()
+  const skip = new Set(dismissed())
+  let n = 0
+  for (const [tripId, files] of groupByTrip(await listTripFiles())) {
+    const local = store().trips.find((x) => x.id === tripId)
+    if (!local && skip.has(tripId)) continue
+    if (local && files.length < 2 && (!local.drive?.fileId || files[0].id === local.drive.fileId)) continue
+    if (await consolidate(tripId, files)) { n++; checked.add(tripId) }
+  }
+  return n
+}
+/** 이번 실행에서 이미 합쳐 본 여행 */
+const checked = new Set<string>()
+
 /** 여행 하나를 Drive와 맞춘다: Drive 쪽이 바뀌었으면 받아서 합치고, 이 기기에만 있는 변경은 올린다 */
 async function syncTrip(tripId: string) {
+  // 처음 맞출 때, 그리고 이 기기가 파일을 모를 때는 같은 여행의 다른 파일이 있는지 먼저 본다
+  const before = store().trips.find((x) => x.id === tripId)
+  if (before && (!checked.has(tripId) || !before.drive?.fileId)) { checked.add(tripId); await consolidate(tripId) }
   const t = store().trips.find((x) => x.id === tripId)
   if (!t) return
   if (!t.drive?.fileId) { await push(tripId); return publishView(tripId) }
@@ -259,15 +337,17 @@ export async function syncNow(opts: { pull?: boolean } = {}) {
   if (!meta.connected) return
   const trips = store().trips
   const pending = trips.filter(isPending)
-  const watched = opts.pull ? trips.filter((t) => t.drive?.fileId && (t.drive.role || t.drive.view) && !isPending(t)) : []
+  // 내 다른 기기에서 고친 것도 받아야 하므로 Drive에 있는 여행은 모두 확인한다
+  const watched = opts.pull ? trips.filter((t) => t.drive?.fileId && !isPending(t)) : []
   if (!tokenValid()) return setStatus({ kind: 'reconnect', pending: pending.length })
   if (!navigator.onLine) return setStatus({ kind: 'offline' })
   const photosWaiting = localPhotoCount() > 0
-  if (!pending.length && !watched.length && !photosWaiting) return setStatus({ kind: 'idle', lastSync: meta.lastSync })
+  if (!pending.length && !watched.length && !photosWaiting && !opts.pull) return setStatus({ kind: 'idle', lastSync: meta.lastSync })
   running = true
   if (pending.length) setStatus({ kind: 'syncing' })
   try {
-    for (const t of [...pending, ...watched]) await syncTrip(t.id)
+    if (opts.pull) await discover()
+    for (const t of [...pending, ...watched]) if (store().trips.some((x) => x.id === t.id)) await syncTrip(t.id)
     if (photosWaiting) await backupPhotos()
     // 사진 백업으로 여행이 바뀌었으면(사진 키가 Drive 것으로 바뀜) 그것도 올린다
     for (const t of store().trips.filter(isPending)) await syncTrip(t.id)

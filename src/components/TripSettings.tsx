@@ -1,4 +1,5 @@
 import { tr } from '../i18n'
+import { dismissTrip } from '../lib/driveFiles'
 import { setTranslateOn, translateOn } from '../lib/translate'
 import { AlertTriangle, Download, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
@@ -65,6 +66,8 @@ export default function TripSettings({ trip, open, onClose, onDeleted }: { trip:
     }
     // 이 기기의 사진도 지운다 (Drive에 백업된 사진의 이 기기 사본 포함)
     for (const j of Object.values(trip.journal)) for (const k of j.photos) { try { await removePhoto(k) } catch { /* 이미 없는 사진 */ } }
+    // 다른 기기에 남은 Drive 파일 때문에 이 기기로 다시 가져오지 않게
+    dismissTrip(trip.id)
     remove(trip.id)
     setBusy(false)
     onClose()
