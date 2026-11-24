@@ -694,4 +694,6 @@ export const EN: Record<string, string> = {
   "기차": "train",
   "좌석 {0}": "Seat {0}",
   "도착 {0}": "Arrives at {0}",
+  "새 버전이 나왔습니다": "A new version is ready",
+  "지금 업데이트": "Update now",
 }

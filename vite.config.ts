@@ -103,6 +103,8 @@ export default defineConfig(({ mode }) => {
       localApi(env),
       VitePWA({
         registerType: 'autoUpdate',
+        // 등록은 src/lib/appUpdate.ts가 한다 (주기적으로 새 버전 확인, 돌아올 때 적용)
+        injectRegister: false,
         includeAssets: ['favicon.svg', 'icon.svg', 'apple-touch-icon.png'],
         manifest: {
           name: 'trj. — THEREALJOURNEY',
@@ -122,6 +124,10 @@ export default defineConfig(({ mode }) => {
         },
         workbox: {
           globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+          // 새 버전은 기다리지 않고 바로 자리 잡고(열린 앱도 새 버전이 맡는다), 지난 버전 캐시는 지운다
+          skipWaiting: true,
+          clientsClaim: true,
+          cleanupOutdatedCaches: true,
           maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
           navigateFallbackDenylist: [/^\/api\//, /^\/privacy/],
           runtimeCaching: [

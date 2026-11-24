@@ -1,4 +1,5 @@
 import { lang, setLang, tr } from '../i18n'
+import { applyUpdate, useUpdateReady } from '../lib/appUpdate'
 import { AnimatePresence, motion, useDragControls } from 'framer-motion'
 import { X } from 'lucide-react'
 import { useEffect, useSyncExternalStore, type ReactNode } from 'react'
@@ -35,6 +36,17 @@ export function toast(msg: string) {
   clearTimeout(toastTimer)
   // 긴 안내는 읽을 시간을 더 준다
   toastTimer = window.setTimeout(() => { toastMsg = ''; toastSubs.forEach((l) => l()) }, Math.min(6000, 2200 + msg.length * 45))
+}
+/** 새 버전이 준비됐다는 띠 (앱을 보고 있는 동안 배포된 경우) */
+export function UpdateBar() {
+  const ready = useUpdateReady()
+  if (!ready) return null
+  return (
+    <div className="update-bar" role="status">
+      <span>{tr('새 버전이 나왔습니다')}</span>
+      <button className="btn btn-primary" onClick={applyUpdate}>{tr('지금 업데이트')}</button>
+    </div>
+  )
 }
 export function Toast() {
   const msg = useSyncExternalStore((l) => { toastSubs.add(l); return () => toastSubs.delete(l) }, () => toastMsg)

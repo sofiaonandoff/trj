@@ -1,4 +1,5 @@
 /// <reference types="vite/client" />
+/// <reference types="vite-plugin-pwa/client" />
 
 interface ImportMetaEnv {
   /** Google Cloud OAuth 클라이언트 ID (Drive 저장·함께 편집) */

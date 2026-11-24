@@ -7,7 +7,7 @@ import { JoinPage } from './components/DriveUI'
 import Home from './components/Home'
 import NewTrip from './components/NewTrip'
 import TripPage from './components/TripPage'
-import { Toast, go, toast, useRoute } from './components/ui'
+import { Toast, UpdateBar, go, toast, useRoute } from './components/ui'
 import { initDrive } from './lib/drive'
 import { decodeTrip } from './lib/share'
 import { useStore } from './store'
@@ -34,5 +34,5 @@ export default function App() {
   else if (route.startsWith('/v/')) page = <ViewPage key={route} source={`k/${route.slice('/v/'.length)}`} />
   else if (route.startsWith('/view/')) page = <ViewPage key={route} source={route.slice('/view/'.length)} />
 
-  return <>{page}<Toast /></>
+  return <>{page}<Toast /><UpdateBar /></>
 }
