@@ -367,8 +367,8 @@ function parsePlain(s: string): number | undefined {
   return Number.isFinite(n) && n > 0 ? n : undefined
 }
 
-const TOTAL = /[\d,]\s*원?\s*예약(?:하기)?\s*$|reserve\s*$|book\s*now|^[^\p{L}\d]*금\s*액|grand\s*total|t[o0]ta[l1i]|^\s*총\b|결제\s*완료|payment\s*complete|\bpaid\b|카드\s*결제|신용\s*카드|paid\s*by|card\s*payment|amount\s*(due|paid)?|balance|합\s*계|총\s*(액|금액|결제)|결제\s*금액|받을\s*금액|청구\s*금액|合\s*計|お会計|ご請求|総額|รวม(ทั้งสิ้น|เงิน)?|ยอดรวม|ยอดสุทธิ|tổng|montant|summe|totale/iu
-const NOT_TOTAL = /sub\s*total|소계|vat|tax|세액|부가세|change|거스름|잔돈|お釣|ทอน|discount|할인|cash\s*tendered|받은\s*금액/i
+const TOTAL = /주문\s*금액|최종\s*결제|실\s*결제|간편\s*결제|[\d,]\s*원?\s*예약(?:하기)?\s*$|reserve\s*$|book\s*now|^[^\p{L}\d]*금\s*액|grand\s*total|t[o0]ta[l1i]|^\s*총\b|결제\s*완료|payment\s*complete|\bpaid\b|카드\s*결제|신용\s*카드|paid\s*by|card\s*payment|amount\s*(due|paid)?|balance|합\s*계|총\s*(액|금액|결제)|결제\s*금액|받을\s*금액|청구\s*금액|合\s*計|お会計|ご請求|総額|รวม(ทั้งสิ้น|เงิน)?|ยอดรวม|ยอดสุทธิ|tổng|montant|summe|totale/iu
+const NOT_TOTAL = /(?<!총\s*)상품\s*금액|(?<![가-힣])(?:판매|정)\s*가(?![가-힣])|배송비|original\s*price|sub\s*total|소계|vat|tax|세액|부가세|change|거스름|잔돈|お釣|ทอน|discount|할인|cash\s*tendered|받은\s*금액/i
 
 /** 합계 줄의 금액을 찾는다. 없으면 통화 기호가 붙은 가장 큰 금액 */
 export function findTotal(lines: string[]): number | undefined {
@@ -394,6 +394,17 @@ const HEADER = /^[\s~.\-]*예약이\s*$|확정되었습니다|예약이\s*확정
 const JUNK = /receipt|tax\s*invoice|invoice|confirmation|영수증|매출|전표|\btel\b|phone|전화|사업자|\bvat\b|no\.|\bdate\b|\btime\b|cashier|\bpos\b|\btable\b|\border\b|주문|領収|レシート|ใบเสร็จ|www\.|http|@/i
 
 /** 가게·장소 이름: 위쪽에 있는 가장 큰 글자 줄 중 의미 있는 것 */
+/**
+ * 이름 앞 OCR 찌꺼기: 상품 썸네일·배지가 '들 ㅎㅇ)'처럼 홀로 선 자모나 괄호로 읽혀 붙는다.
+ * 앞쪽 세 낱말 안에서 자모(ㄱ-ㅣ)가 든 낱말이나 ')'로 끝나는 짧은 낱말까지 떼어 낸다.
+ */
+export function stripJamo(name: string): string {
+  const w = name.split(/\s+/)
+  let cut = -1
+  for (let i = 0; i < Math.min(3, w.length - 1); i++) if (/[ㄱ-ㅣ]/.test(w[i]) || /^\S{0,3}\)$/.test(w[i])) cut = i
+  return cut >= 0 ? w.slice(cut + 1).join(' ') : name
+}
+
 export function findName(lines: OcrLine[]): string | undefined {
   const good = lines
     .map((l) => ({ ...l, text: l.text.replace(/[|_~=*#<>]+/g, ' ').replace(/\s+/g, ' ').trim() }))
@@ -761,7 +772,7 @@ export function readText(all: OcrLine[], days: string[], tripCurrency: string): 
   const stay = kind?.cat === 'stay' ? stayOf(body.map((l) => l.text), days) : undefined
   const tour = tourPage ? readTour(body.map((l) => l.text)) : undefined
   return {
-    name: ride ? `${ride.from} → ${ride.to}` : stayName ?? tour?.name ?? (name && fixBrand(name)),
+    name: ride ? `${ride.from} → ${ride.to}` : stayName ?? tour?.name ?? (name && fixBrand(stripJamo(name))),
     code: findCode(text) ?? tour?.code,
     date: ride?.date ?? pickTripDate(text, days),
     time: ride?.time ?? findTime(lines.filter((l) => /시간|시각|time|체크\s*인|check[\s-]*in|입장|時/i.test(l.text)).map((l) => l.text).join('\n')) ?? findTime(body.map((l) => l.text).join('\n')),
