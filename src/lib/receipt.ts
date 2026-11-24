@@ -423,6 +423,11 @@ export function withCount(name: string, text: string): string {
   return n >= 2 && !/외\s*\d+\s*건/.test(name) ? `${name} ${tr('외 {0}건', n - 1)}` : name
 }
 
+/** 주문 내역의 상품 목록 머리글 */
+const ORDER_HEAD = /^\W*(?:주문\s*상품|구매\s*상품|주문\s*내역|ordered?\s*items?|order\s*details?)(?=\s|\d|$)/i
+/** 상품 옵션 줄: '옵션', '데이터 플랜: C. …', '색상: 검정 / 사이즈: M', '1개 (+18,020원)' */
+const OPTION_LINE = /^\W*(?:\S{1,4}\s+)?(?:옵션|option)(?=\s|$)|(?:플랜|용량|사용\s*기간|색상|사이즈|수량|구성|선택|타입|type|size|colou?r|qty|quantity|plan)\s*[:：]|^\W*\d+\s*개\s*\(|\(\s*[+＋]\s*[\d,]+\s*원\s*\)/i
+
 export function findName(lines: OcrLine[]): string | undefined {
   const good = lines
     .map((l) => ({ ...l, text: l.text.replace(/[|_~=*#<>]+/g, ' ').replace(/\s+/g, ' ').trim() }))
@@ -430,6 +435,14 @@ export function findName(lines: OcrLine[]): string | undefined {
     .filter((l) => !HEADER.test(l.text) && !findCode(l.text) && !ADDRESS.test(l.text) && !/^(체크|check|seat|좌석|객실|room|guest|승객|passenger|pickup|drop)/i.test(l.text))
     .filter((l) => l.text.length >= 2 && l.text.length <= 48 && /\p{L}{2,}/u.test(l.text) && !JUNK.test(l.text) && (l.text.match(/\d/g)?.length ?? 0) <= l.text.length / 3)
   if (!good.length) return undefined
+  // 주문 내역: '주문상품 2건' 머리글 바로 아래의 상품 줄 (옵션·수량 줄은 이름이 아니다)
+  const head = lines.find((l) => ORDER_HEAD.test(l.text))
+  if (head) {
+    const item = good.find((l) => l.top > head.top && !OPTION_LINE.test(l.text) && !ORDER_HEAD.test(l.text) && (l.text.match(/\p{L}/gu) ?? []).length >= 4)
+    if (item) return item.text
+  }
+  const named = good.filter((l) => !OPTION_LINE.test(l.text))
+  if (named.length) good.splice(0, good.length, ...named)
   // 숙소 확인서: 호텔·리조트 이름이 든 줄을 먼저
   const stay = good.find((l) => /hotel|resort|inn\b|hostel|suites?|ryokan|호텔|리조트|료칸|게스트하우스|ホテル|旅館/i.test(l.text) && !/(번호|number)/i.test(l.text))
   if (stay) return stay.text
