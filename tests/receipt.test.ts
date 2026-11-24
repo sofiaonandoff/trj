@@ -1,5 +1,5 @@
 import { despaceCJK } from '../src/lib/ocr'
-import { findCode, findStayDates, findStayInfo, stayTime, findDates, findName, findTime, findTotal, fixBrand, parseAmount, pickTripDate, readText, fixFlightNos, stripJamo } from '../src/lib/receipt'
+import { findCode, findStayDates, findStayInfo, stayTime, findDates, findName, findTime, findTotal, fixBrand, parseAmount, pickTripDate, readText, fixFlightNos, stripJamo, tidyItemName, withCount } from '../src/lib/receipt'
 
 import { loadWorldAirports } from '../src/data/airports'
 await loadWorldAirports()
@@ -136,5 +136,6 @@ check('버스표: 인천공항T1 → 미금역, 11.30 22:20, 경기고속 심야
 const esim = readText(["12:37 94                                    oll T ED", "FEHS 2026112449681501", "수신자정보", "오혜수, 010-4***-6*** > 보기", "주문상품 2건                                                     스", "들 ㅎㅇ) 호주이심 시드니 브리즈번 멜버른 6517 텔스...", "EER] = 데이터 플랜: C. 호주&뉴질랜드 듀얼 65144 /", "65107 데이터 용량: [호주&뉴질랜드 56] Of", "일 168 / 사용기간: 15일 1개 (+18,020원)", "들 ㅎㅇ) 호주이심 시드니 브리즈번 멜버른 65171 텔스...", "IPN 2 데이터 플랜: C. 호주&뉴질랜드 듀얼 65114 /", "65107 데이터 용량: [호주&뉴질랜드 56] 총", "2068 /사용기간: 15일 1개 (+27,020원)", "주문금액                                          45,050원", "상품금액                                            46,800원", "배송비                                                       0원", "할인/쿠폰                                             -1,750원", "결제상세", "카드 간편결제                                          45,050원", "삼성 QA Q-F*F* _xkkk _kkxx  일시불", "승인일시 : 2026.11.24 12:37", "주문 상세 보기"].map((text, i) => ({ text, top: i * 40, height: 30 })), ['2026-12-07', '2026-12-08'], 'NZD')
 check('주문 내역: 주문금액 45,050원 (상품금액 46,800원 아님), 이름 앞 찌꺼기 없음', esim.amount === 45050 && esim.currency === 'KRW' && stripJamo('들 ㅎㅇ) 호주이심 시드니 브리즈번') === '호주이심 시드니 브리즈번' && stripJamo('ㅇ 스타벅스') === '스타벅스' && stripJamo('Café de Flore') === 'Café de Flore', [esim.amount])
 check('합계 줄: 주문금액·간편결제는 합계, 상품금액·정가는 아님', findTotal(['상품금액 46,800원', '주문금액 45,050원']) === 45050 && findTotal(['정가 52,000원', '카드 간편결제 47,000원']) === 47000 && findTotal(['상품금액 50,000원', '총 상품 금액 74,258원']) === 74258 && findTotal(['일정 조정 가능', '합계 12,000원']) === 12000)
+check('상품 이름: 잘린 낱말·잘못 읽은 숫자를 떼고 여러 건이면 외 N건', /^호주이심 시드니 브리즈번 멜버른 (외 1건|\+1 more)$/.test(withCount(tidyItemName('호주이심 시드니 브리즈번 멜버른 6517 텔스...'), '주문상품 2건')) && withCount('커피', '상품 1건') === '커피' && tidyItemName('2026 시즌 한정 티켓 2인') === '2026 시즌 한정 티켓 2인' && tidyItemName('Starbucks 1234') === 'Starbucks 1234', withCount(tidyItemName('호주이심 시드니 브리즈번 멜버른 6517 텔스...'), '주문상품 2건'))
 console.log(fail ? `${fail}개 실패` : '모두 통과')
 process.exit(fail ? 1 : 0)

@@ -405,6 +405,24 @@ export function stripJamo(name: string): string {
   return cut >= 0 ? w.slice(cut + 1).join(' ') : name
 }
 
+/**
+ * 상품 이름 다듬기 (쇼핑·주문 내역):
+ * - 말줄임으로 잘린 마지막 낱말('텔스...')은 뗀다
+ * - 한글 이름 사이에 홀로 선 숫자 덩어리는 영문을 잘못 읽은 것('esim' → '6517')이라 뗀다 (연도·'2인' 같은 건 남긴다)
+ */
+export function tidyItemName(name: string): string {
+  let w = name.replace(/\s*(?:\.{2,}|…)\s*$/, '…').split(/\s+/)
+  if (w.length > 2 && /…$/.test(w[w.length - 1])) w = w.slice(0, -1)
+  const hangulWords = w.filter((x) => /[가-힣]{2}/.test(x)).length
+  if (hangulWords >= 2) w = w.filter((x) => !/^\d{3,6}$/.test(x) || /^(19|20)\d\d$/.test(x))
+  return w.join(' ').replace(/…$/, '').trim() || name
+}
+/** 주문 상품이 여러 건이면 '첫 상품 외 N건' */
+export function withCount(name: string, text: string): string {
+  const n = Number(text.match(/(?:주문\s*상품|상품|items?)\s*(\d{1,2})\s*(?:건|개|items?)/i)?.[1] ?? 0)
+  return n >= 2 && !/외\s*\d+\s*건/.test(name) ? `${name} ${tr('외 {0}건', n - 1)}` : name
+}
+
 export function findName(lines: OcrLine[]): string | undefined {
   const good = lines
     .map((l) => ({ ...l, text: l.text.replace(/[|_~=*#<>]+/g, ' ').replace(/\s+/g, ' ').trim() }))
@@ -772,7 +790,7 @@ export function readText(all: OcrLine[], days: string[], tripCurrency: string): 
   const stay = kind?.cat === 'stay' ? stayOf(body.map((l) => l.text), days) : undefined
   const tour = tourPage ? readTour(body.map((l) => l.text)) : undefined
   return {
-    name: ride ? `${ride.from} → ${ride.to}` : stayName ?? tour?.name ?? (name && fixBrand(stripJamo(name))),
+    name: ride ? `${ride.from} → ${ride.to}` : stayName ?? tour?.name ?? (name && withCount(tidyItemName(fixBrand(stripJamo(name))), text)),
     code: findCode(text) ?? tour?.code,
     date: ride?.date ?? pickTripDate(text, days),
     time: ride?.time ?? findTime(lines.filter((l) => /시간|시각|time|체크\s*인|check[\s-]*in|입장|時/i.test(l.text)).map((l) => l.text).join('\n')) ?? findTime(body.map((l) => l.text).join('\n')),
