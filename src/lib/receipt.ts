@@ -106,6 +106,12 @@ export function findStayDates(text: string, days: string[]): Reading['stay'] {
         const tOut = /\d\s*:\s*\d\d/.test(halves[1]) ? stayTime(halves[1].replace(/\d{4}/g, ''), false) : undefined
         return { checkIn: ds[0], checkOut: ds[1], inTime: tIn, outTime: tOut }
       }
+      // 아래 몇 줄에 'Check-in: After 14:00' / 'Check-out: Before 12:00'이 따로 있으면 그것
+      const around = lines.slice(Math.max(0, i - 2), i + 4).filter((l) => /\d\s*[:.]\s*\d\d/.test(l) && !findDates(l, year).length)
+      // 시각이 항목 이름 뒤에 있어야 그 항목 시각이다 ('14:00   Check-out   Room'의 14:00은 체크인 칸)
+      const after = (l: string, re: RegExp) => { const m = l.match(re); return Boolean(m) && (m!.index ?? 0) < l.search(/\d{1,2}\s*[:.]\s*\d\d/) }
+      const inLine = around.find((l) => after(l, IN) && !OUT.test(l)), outLine = around.find((l) => after(l, OUT) && !IN.test(l))
+      if (inLine || outLine) return { checkIn: ds[0], checkOut: ds[1], inTime: inLine ? stayTime(inLine, true) : undefined, outTime: outLine ? stayTime(outLine, false) : undefined }
       const near = [lines[i + 1] ?? '', lines[i - 1] ?? ''].find((l) => /\d\s*[:.]\s*\d\d/.test(l) && !findDates(l, year).length) ?? ''
       const cs = columns(near)
       const inCol = cs.find((c) => /\d\s*[:.]\s*\d\d/.test(c) && !OUT.test(c))
@@ -150,6 +156,9 @@ export function stripLeadJunk(name: string): string {
  * - 도시: 'Tauranga의 숙소'의 Tauranga (주소로 위치를 찾을 때 함께 쓴다)
  * - 주소: '찾아가는 방법'·'주소'·'Address' 다음 줄
  */
+/** 예약 화면의 버튼·링크 줄 (숙소 이름·주소가 아니다) */
+const UI_LINE = /message\s+property|call\s*\/\s*email|property\s+details|modify\s+dates|view\s+map|local-language|price\s+details|cancellation\s+policy|manage\s+booking|cancel\s+booking|get\s+directions|^\W*directions\b|숙소\s*(?:정보|상세|에\s*문의)|메시지\s*보내기|전화|길\s*찾기|지도\s*보기|날짜\s*변경|예약\s*(?:관리|취소)|취소\s*규정/i
+const HOTEL_WORD = /hotel|resort|\binn\b|hostel|suites?\b|ryokan|호텔|리조트|료칸|게스트하우스|ホテル|旅館/i
 export function findStayInfo(lines: string[]): { name?: string; city?: string; address?: string; host?: string; room?: string } {
   const out: { name?: string; city?: string; address?: string; host?: string; room?: string } = {}
   const clean = (s: string) => s.replace(/^[^\p{L}\p{N}]+/u, '').replace(/\s+/g, ' ').trim()
@@ -165,9 +174,12 @@ export function findStayInfo(lines: string[]): { name?: string; city?: string; a
       const best = cols.sort((a, b) => b.length - a.length)[0] ?? ''
       return stripLeadJunk(best.replace(/^[^\p{L}\p{N}]+/u, '').replace(/^(?:[a-z]{1,4}\s+)+(?=[\p{Lu}가-힣])/u, '').trim())
     }
-    // 바로 위 줄만 본다 (문장·항목 이름은 숙소 이름이 아니다)
-    const prev = lines[di - 1] ?? ''
-    const nm = !skip.test(prev) ? tidy(prev) : ''
+    // 바로 위 줄을 본다 (문장·항목 이름은 숙소 이름이 아니다). 버튼·링크 줄('Message Property', 'Property details')과
+    // 현지어로 한 번 더 적은 줄은 건너뛰고, 위 네 줄 안에 'Hotel'이 든 줄이 있으면 그것 (트립닷컴 예약 상세)
+    const above = lines.slice(Math.max(0, di - 5), di).reverse().filter((l) => !UI_LINE.test(l) && /\p{L}{2,}/u.test(l))
+    const hotel = above.find((l) => HOTEL_WORD.test(l) && !skip.test(l))
+    const prev = hotel ?? (UI_LINE.test(lines[di - 1] ?? '') ? above[0] ?? '' : lines[di - 1] ?? '')
+    const nm = !skip.test(prev) ? tidy(prev).replace(/\s+[—–-]\s*$/, '') : ''
     const sentence = /[.!?]$|\b(you|your|will|the next|in the|we)\b/i.test(nm) || nm.split(' ').length > 7
     if (nm.length >= 4 && nm.length <= 60 && !sentence && /\p{L}{3,}/u.test(nm)) out.name = nm
     const nx = tidy(lines[di + 1] ?? '')
@@ -180,7 +192,14 @@ export function findStayInfo(lines: string[]): { name?: string; city?: string; a
     if (t && !out.city) { out.city = t[1].trim(); if (!out.name) out.name = `${out.city}의 ${t[2]}` }
     const h = l.match(/(?:호스트|host(?:ed by)?)?\s*[:：]\s*([\p{L}][\p{L} .'-]{0,30}?)\s*님\s*$|hosted by\s+([\p{L}][\p{L} .'-]{0,30})$/iu)
     if (h && !out.host) out.host = (h[1] ?? h[2]).trim()
-    if (/찾아가는\s*방법|^\W*주소\b|\baddress\b|getting there|所在地|住所/i.test(l) && !out.address) {
+    // 'Location' / '위치' 머리글 다음 줄들이 주소 (줄이 쉼표로 이어지면 붙인다, 끝의 복사 아이콘 찌꺼기는 뗀다)
+    if (/^\W*(?:location|위치|숙소\s*위치)\s*$/i.test(l) && !out.address) {
+      let a = clean(lines[i + 1] ?? '')
+      if (/,\s*\S*$/.test(a) && lines[i + 2] && !UI_LINE.test(lines[i + 2])) a = `${a} ${clean(lines[i + 2])}`
+      a = a.replace(/(\p{L})\s+(?:\d{1,2}|[^\p{L}\p{N}\s]{1,3})$/u, '$1').trim()
+      if (/\d/.test(a) && /\p{L}{3,}/u.test(a) && !UI_LINE.test(a) && a.length <= 120) out.address = fixAddress(a)
+    }
+    if (/찾아가는\s*방법|^\W*주소\b|\baddress\b|getting there|所在地|住所/i.test(l) && !out.address && !UI_LINE.test(l)) {
       const own = l.replace(/.*(찾아가는\s*방법|주소|address|getting there|所在地|住所)\s*[:：]?/i, '').trim()
       const next = clean(lines[i + 1] ?? '')
       const cand = own.length > 4 ? own : next
