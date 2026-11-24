@@ -685,4 +685,9 @@ export const EN: Record<string, string> = {
   "누구 일정": "Whose plan",
   "그룹": "Groups",
   "전체": "All",
+  "사진에서 기록한 지출": "Expenses from photos",
+  "금액을 찾지 못했습니다": "Couldn't find an amount",
+  "지출": "Expense",
+  "금액을 찾지 못해 기록하지 않았습니다. 지출 기록으로 직접 넣어 주세요": "No amount found, so nothing was recorded. Add it with Log expense",
+  "영수증, 예약·결제 화면, 예약 확인서 PDF의 금액을 이 기기 안에서 읽어 예산에만 기록합니다 (일정에는 넣지 않고, 사진은 밖으로 나가지 않습니다). 날짜는 사진 속 날짜, 없으면 찍은 날짜를 따릅니다.": "Reads amounts from receipts, booking or payment screens and confirmation PDFs on this device and records them in the budget only (nothing is added to the plan, and photos never leave your device). The date comes from the photo, or when it was taken.",
 }

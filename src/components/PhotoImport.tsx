@@ -1,7 +1,7 @@
 import { tr } from '../i18n'
 import { BedDouble, CalendarCheck, Loader2, Plane, Receipt, Undo2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { applyDraft, dateFromLabel, readTripPhoto, switchAirport, switchStay, undoApplied, type Applied, type StayChoice } from '../lib/photoImport'
+import { applyDraft, applyExpenseOnly, dateFromLabel, readTripPhoto, switchAirport, switchStay, undoApplied, type Applied, type StayChoice } from '../lib/photoImport'
 import { md, won } from '../lib/util'
 import { putFlight, useStore } from '../store'
 import type { Trip } from '../types'
@@ -17,7 +17,11 @@ const money = (a: { value: number; currency: string }) => (a.currency === 'KRW' 
  * 고른 사진들을 차례로 읽어 바로 일정·예산에 넣고, 무엇을 어느 날에 넣었는지 보여 준다.
  * 잘못 들어간 것은 여기서 바로 뺄 수 있다.
  */
-export default function PhotoImport({ trip, files, current, onClose, onGo }: { trip: Trip; files: File[] | null; current: string; onClose: () => void; onGo: (date: string) => void }) {
+/**
+ * mode 'budget': 예산 탭에서 넣은 사진. 일정에는 넣지 않고 금액만 지출로 기록한다.
+ */
+export default function PhotoImport({ trip, files, current, onClose, onGo, mode = 'plan' }: { trip: Trip; files: File[] | null; current: string; onClose: () => void; onGo?: (date: string) => void; mode?: 'plan' | 'budget' }) {
+  const budget = mode === 'budget'
   const mutate = useStore((s) => s.mutate)
   const [jobs, setJobs] = useState<Job[]>([])
   const seq = useRef(0)
@@ -39,8 +43,9 @@ export default function PhotoImport({ trip, files, current, onClose, onGo }: { t
             const drafts = await readTripPhoto(b.f, tripRef.current, current, (stage) => { if (alive) set(b.job.id, { stage }) })
             if (!alive) return
             const results: Applied[] = []
-            mutate(trip.id, (t) => { for (const d of drafts) results.push(applyDraft(t, d, putFlight, currentGroup(trip.id))) })
-            set(b.job.id, { status: 'done', results })
+            mutate(trip.id, (t) => { for (const d of drafts) results.push(budget ? applyExpenseOnly(t, d, currentGroup(trip.id)) : applyDraft(t, d, putFlight, currentGroup(trip.id))) })
+            // 예산 탭: 금액이 없는 항목(같은 사진의 항공편 등)은 보여 주지 않는다. 하나도 없으면 '금액을 찾지 못했습니다'
+            set(b.job.id, { status: 'done', results: budget ? results.filter((r) => !('noAmount' in r && r.noAmount)) : results })
           } catch (e) {
             if (alive) set(b.job.id, { status: 'error', error: (e as Error).message || tr('사진을 읽지 못했습니다') })
           }
@@ -81,7 +86,7 @@ export default function PhotoImport({ trip, files, current, onClose, onGo }: { t
   const moved = jobs.flatMap((j) => j.results).find((r) => !r.undone && !r.flightId && r.date !== current && dayNo(r.date) > 0)
 
   return (
-    <Sheet open={Boolean(files?.length)} onClose={onClose} title={busy ? tr('사진을 읽는 중') : tr('사진에서 넣은 것')}>
+    <Sheet open={Boolean(files?.length)} onClose={onClose} title={busy ? tr('사진을 읽는 중') : budget ? tr('사진에서 기록한 지출') : tr('사진에서 넣은 것')}>
       <div className="imports">
         {jobs.map((j) => (
           <div className="import" key={j.id}>
@@ -89,22 +94,22 @@ export default function PhotoImport({ trip, files, current, onClose, onGo }: { t
             <div className="grow">
               {j.status === 'reading' && <p className="mute"><Loader2 size={15} className="spin" /> {j.stage ?? tr('사진을 여는 중')}</p>}
               {j.status === 'error' && <p className="parsed miss">{j.error}</p>}
-              {j.status === 'done' && !j.results.length && <p className="mute">{tr('일정에 넣을 내용을 찾지 못했습니다')}</p>}
+              {j.status === 'done' && !j.results.length && <p className="mute">{budget ? tr('금액을 찾지 못했습니다') : tr('일정에 넣을 내용을 찾지 못했습니다')}</p>}
               {j.results.map((r, k) => (
                 <div className={`import-row${r.undone ? ' undone' : ''}`} key={k}>
                   <span className="grow">
-                    <b>{r.flightId ? <Plane size={14} /> : r.stayId ? <BedDouble size={14} /> : r.noPlace ? <Receipt size={14} /> : null} {r.title}</b>
+                    <b>{budget ? <Receipt size={14} /> : r.flightId ? <Plane size={14} /> : r.stayId ? <BedDouble size={14} /> : r.noPlace ? <Receipt size={14} /> : null} {r.title || tr('지출')}</b>
                     <small>
-                      {[
+                      {(budget ? [md(r.date), r.amount && (r.expenseId ? tr('{0} 예산에 기록', money(r.amount)) : money(r.amount))] : [
                         r.flightId ? tr('항공편') : r.stayId ? tr('숙소') : tr('{0}일차', dayNo(r.date)),
                         r.stayId && r.checkOut ? tr('{0} 체크인 → {1} 체크아웃', md(r.date), md(r.checkOut)) : md(r.date), r.time,
                         r.amount && (r.expenseId ? tr('{0} 예산에 기록', money(r.amount)) : money(r.amount)),
-                      ].filter(Boolean).join(' · ')}
+                      ]).filter(Boolean).join(' · ')}
                     </small>
-                    {!r.undone && r.date !== current && !r.flightId && !r.stayId && dayNo(r.date) > 0 && (
+                    {!budget && !r.undone && r.date !== current && !r.flightId && !r.stayId && dayNo(r.date) > 0 && (
                       <small className="moved"><CalendarCheck size={13} />{tr('{0}에 맞춰 {1}일차에 넣었습니다', dateFromLabel(r.dateFrom), dayNo(r.date))}</small>
                     )}
-                    {!r.undone && r.stayId && r.choices && r.choices.length > 1 && (
+                    {!budget && !r.undone && r.stayId && r.choices && r.choices.length > 1 && (
                       <span className="choice-row">
                         <small className="mute">{tr('같은 이름의 숙소가 여럿입니다. 맞는 곳을 고르세요')}</small>
                         <span className="chips">
@@ -114,7 +119,7 @@ export default function PhotoImport({ trip, files, current, onClose, onGo }: { t
                         </span>
                       </span>
                     )}
-                    {!r.undone && r.flightId && r.airportChoices?.filter((c) => j.results.findIndex((x) => x.airportChoices?.some((y) => y.word === c.word)) === k).map((c) => (
+                    {!budget && !r.undone && r.flightId && r.airportChoices?.filter((c) => j.results.findIndex((x) => x.airportChoices?.some((y) => y.word === c.word)) === k).map((c) => (
                       <span className="choice-row" key={c.word}>
                         <small className="mute">{tr("'{0}'가 어느 공항인지 확인하세요 (비행시간으로 골랐습니다)", c.word)}</small>
                         <span className="chips">
@@ -126,11 +131,12 @@ export default function PhotoImport({ trip, files, current, onClose, onGo }: { t
                         </span>
                       </span>
                     ))}
-                    {r.noPlace && <small className="mute">{tr('위치를 찾지 못해 예산에만 기록했습니다')}</small>}
+                    {'noAmount' in r && Boolean(r.noAmount) && <small className="mute">{tr('금액을 찾지 못해 기록하지 않았습니다. 지출 기록으로 직접 넣어 주세요')}</small>}
+                    {!budget && r.noPlace && <small className="mute">{tr('위치를 찾지 못해 예산에만 기록했습니다')}</small>}
                     {r.duplicate && <small className="mute">{tr('이미 들어 있어 다시 넣지 않았습니다')}</small>}
                     {r.undone && <small className="mute">{tr('뺐습니다')}</small>}
                   </span>
-                  {!r.undone && !(r.duplicate && !r.expenseId && !r.placeAdded && !r.stayAdded) && (
+                  {!r.undone && (budget ? Boolean(r.expenseId) : !(r.duplicate && !r.expenseId && !r.placeAdded && !r.stayAdded)) && (
                     <button className="icon-btn" aria-label={tr('{0} 빼기', r.title)} onClick={() => undo(j.id, k)}><Undo2 size={18} /></button>
                   )}
                 </div>
@@ -139,10 +145,10 @@ export default function PhotoImport({ trip, files, current, onClose, onGo }: { t
           </div>
         ))}
       </div>
-      <p className="hint">{tr('영수증, 예약 화면, 탑승권, 장소 사진, 예약 확인서 PDF를 이 기기 안에서 읽습니다 (사진은 밖으로 나가지 않습니다). 날짜는 사진 속 날짜, 없으면 찍은 날짜를 따르고, 금액은 예산 탭에 기록되어 동행과 똑같이 나눕니다.')}</p>
+      <p className="hint">{budget ? tr('영수증, 예약·결제 화면, 예약 확인서 PDF의 금액을 이 기기 안에서 읽어 예산에만 기록합니다 (일정에는 넣지 않고, 사진은 밖으로 나가지 않습니다). 날짜는 사진 속 날짜, 없으면 찍은 날짜를 따릅니다.') : tr('영수증, 예약 화면, 탑승권, 장소 사진, 예약 확인서 PDF를 이 기기 안에서 읽습니다 (사진은 밖으로 나가지 않습니다). 날짜는 사진 속 날짜, 없으면 찍은 날짜를 따르고, 금액은 예산 탭에 기록되어 동행과 똑같이 나눕니다.')}</p>
       {!busy && (
         <div className="row" style={{ marginTop: 12 }}>
-          {moved && <button className="btn btn-ghost" onClick={() => { onGo(moved.date); onClose() }}>{tr('{0}일차 보기', dayNo(moved.date))}</button>}
+          {!budget && moved && onGo && <button className="btn btn-ghost" onClick={() => { onGo(moved.date); onClose() }}>{tr('{0}일차 보기', dayNo(moved.date))}</button>}
           <button className="btn btn-primary" onClick={onClose}>{tr('확인')}</button>
         </div>
       )}

@@ -1,9 +1,10 @@
 import { tr } from '../i18n'
+import PhotoImport from './PhotoImport'
 import GroupPicker from './GroupPicker'
 import { currentGroup } from '../lib/groups'
 import { splitFor, payerFor } from '../store'
 import { tx, useTranslations } from '../lib/translate'
-import { ArrowRight, Plus, Trash2 } from 'lucide-react'
+import { ArrowRight, Camera, Plus, Trash2 } from 'lucide-react'
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { md, today, uid, won } from '../lib/util'
 import { CURRENCIES, baseOf, customRate, krwToBase, money, rateInBase, rateOf, resetRate, setBudget, setRateInBase, setViewerBase, onBaseChange, budgetCurrency, budgetKrw as budgetInKrw, toWon as wonOf, unit } from '../data/currencies'
@@ -48,6 +49,18 @@ export default function BudgetTab({ trip, readOnly = false }: { trip: Trip; read
   useTranslations()
   const mutate = useStore((s) => s.mutate)
   const [edit, setEdit] = useState<Expense | 'new'>()
+  // 예산 탭에서 넣은 사진은 일정이 아니라 예산에만 기록한다
+  const [photos, setPhotos] = useState<File[] | null>(null)
+  const today = new Date().toLocaleDateString('sv')
+  const addButtons = (
+    <>
+      <button className="btn btn-primary" onClick={() => setEdit('new')}><Plus size={18} />{tr('지출 기록')}</button>
+      <label className="btn btn-ghost">
+        <Camera size={18} />{tr('사진으로 추가')}
+        <input type="file" accept="image/*,application/pdf" multiple hidden onChange={(e) => { const f = [...(e.target.files ?? [])]; e.target.value = ''; if (f.length) setPhotos(f) }} />
+      </label>
+    </>
+  )
   const toWon = (e: Expense) => wonOf(trip, e.amount, e.currency)
   const total = trip.expenses.reduce((s, e) => s + toWon(e), 0)
   const byCat = CATS.map((c) => ({ c, v: trip.expenses.filter((e) => e.category === c).reduce((s, e) => s + toWon(e), 0) })).filter((x) => x.v > 0)
@@ -100,7 +113,7 @@ export default function BudgetTab({ trip, readOnly = false }: { trip: Trip; read
       </section>
 
       {/* 쓴 돈 바로 아래에서도 지출을 기록할 수 있게 */}
-      {!readOnly && <div style={{ margin: '12px 20px 0' }}><button className="btn btn-primary btn-block" onClick={() => setEdit('new')}><Plus size={18} />{tr('지출 기록')}</button></div>}
+      {!readOnly && <div className="add-row" style={{ margin: '12px 20px 0', padding: 0 }}>{addButtons}</div>}
 
       {used.length > 0 && (
         <section className="panel">
@@ -193,10 +206,11 @@ export default function BudgetTab({ trip, readOnly = false }: { trip: Trip; read
             ))}
           </div>
         ) : <div className="empty"><strong>{tr('기록한 지출이 없습니다')}</strong>{readOnly ? null : tr('결제한 사람과 나눌 사람을 고르면 정산까지 계산합니다.')}</div>}
-        {!readOnly && <button className="btn btn-primary btn-block" style={{ marginTop: 14 }} onClick={() => setEdit('new')}><Plus size={18} />{tr('지출 기록')}</button>}
+        {!readOnly && <div className="add-row" style={{ marginTop: 14, padding: 0 }}>{addButtons}</div>}
       </section>
 
       {!readOnly && <ExpenseSheet trip={trip} edit={edit} onClose={() => setEdit(undefined)} />}
+      {!readOnly && photos && <PhotoImport mode="budget" trip={trip} files={photos} current={today >= trip.start && today <= trip.end ? today : trip.start} onClose={() => setPhotos(null)} />}
     </>
   )
 }

@@ -338,6 +338,25 @@ export function applyDraft(t: Trip, d: Draft, putFlight: (t: Trip, f: Flight) =>
   return res
 }
 
+/**
+ * 예산 탭에서 넣은 사진: 일정(장소·숙소·항공편)은 건드리지 않고 금액만 지출로 기록한다.
+ * 지출 이름은 사진에서 읽은 가게·숙소·항공편 이름. 금액을 못 찾았으면 noAmount.
+ */
+export function applyExpenseOnly(t: Trip, d: Draft, group?: string): Applied & { noAmount?: boolean } {
+  const f = d.flight
+  const title = d.stay?.name ?? d.place?.name ?? (f ? `${/\d/.test(f.flightNo) ? f.flightNo : airlineOf(f.flightNo) || f.flightNo} ${f.from} → ${f.to}` : undefined) ?? d.expense?.title ?? ''
+  const res: Applied & { noAmount?: boolean } = { date: d.expense?.date ?? d.date, dateFrom: d.dateFrom, title }
+  const e = d.expense
+  if (!e || !(e.amount > 0)) { res.noAmount = true; return res }
+  const same = t.expenses.find((x) => x.amount === e.amount && x.date === e.date && (x.title === e.title || x.title === title))
+  if (same) { res.duplicate = true; res.amount = { value: e.amount, currency: e.currency }; return res }
+  const g = group ? { group } : {}
+  t.expenses.push({ ...e, title: title || e.title, ...g, payer: payerFor(t, group), split: splitFor(t, group) })
+  res.expenseId = e.id
+  res.amount = { value: e.amount, currency: e.currency }
+  return res
+}
+
 /** 넣은 것을 되돌린다 */
 export function undoApplied(t: Trip, a: Applied) {
   if (a.stayId && a.stayAdded) removeStay(t, a.stayId)
