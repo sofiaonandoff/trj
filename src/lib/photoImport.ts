@@ -203,7 +203,7 @@ export async function readTripPhoto(file: File, trip: Trip, current: string, onS
       }
     }
   }
-  if (!r.costOnly && !where) {
+  if (!r.costOnly && !where && !r.ride) {
     if (gps) {
       where = gps
       // 영수증이면 글자 속 가게 이름을, 풍경 사진이면 그 위치의 장소 이름을 쓴다
@@ -215,6 +215,32 @@ export async function readTripPhoto(file: File, trip: Trip, current: string, onS
   }
   const title = name ?? (r.costOnly ? tr('교통비') : tr('사진 속 결제'))
   const expense = money ? { id: uid(), title: money.extra ? `${title} (${money.extra})` : title, amount: money.amount, currency: money.currency, category: r.expenseCategory, date } : undefined
+  // 버스·기차 승차권: 출발 정류장에 '청주시외 → 인천공항T2 버스'를 넣고, 도착지·회사·좌석은 메모로
+  const ride = r.ride
+  if (ride) {
+    const queries = (stop: string) => [
+      ride.kind === 'bus' && /(시외|고속|종합|버스)$/.test(stop) ? `${stop.replace(/버스$/, '')}버스터미널` : undefined,
+      /공항\s*T([12])$/.test(stop) ? stop.replace(/\s*T([12])$/, ' 제$1여객터미널') : undefined,
+      ride.kind === 'train' && !/역$/.test(stop) ? `${stop}역` : undefined,
+      stop,
+    ].filter(Boolean) as string[]
+    const find = async (stop: string) => {
+      for (const q of queries(stop)) { const hit = (await searchPlaces(q, near).catch(() => []))[0]; if (hit) return hit }
+      return undefined
+    }
+    const [a, b] = await Promise.all([find(ride.from), find(ride.to)])
+    const label = ride.kind === 'bus' ? tr('버스') : tr('기차')
+    const rideName = `${ride.from} → ${ride.to} ${label}`
+    // 걸리는 시간: 직선거리로 어림 (버스 시속 70km, 기차 110km, 길이 굽은 만큼 1.3배)
+    const duration = a && b ? Math.max(30, Math.round((km(a, b) * 1.3) / (ride.kind === 'bus' ? 70 : 110) * 6) * 10) : 120
+    const note = [ride.company, ride.grade, ride.seat && tr('좌석 {0}', ride.seat), tr('도착 {0}', ride.to), r.code && tr('예약번호 {0}', r.code)].filter(Boolean).join(' · ')
+    const loc = a ?? where ?? near
+    out.push({
+      date, dateFrom: from, expense: expense && { ...expense, title: rideName, category: 'move' },
+      place: { id: uid(), name: rideName, lat: loc.lat, lng: loc.lng, address: a?.detail, category: 'move', time: r.time, duration, note },
+    })
+    return out
+  }
   if (r.category === 'stay' && name && r.stay?.checkIn) {
     // 숙소: 위치를 못 찾았으면 그 도시 가운데로 두고 이름으로 고칠 수 있게 한다
     const loc = where ?? { lat: near.lat, lng: near.lng }

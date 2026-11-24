@@ -32,6 +32,8 @@ export interface Reading {
   stay?: { checkIn?: string; checkOut?: string; inTime?: string; outTime?: string; address?: string; city?: string; host?: string; room?: string }
   /** 투어·액티비티 바우처(GetYourGuide, Klook, KKday 등)면 만나는 곳과 안내 */
   tour?: TourInfo
+  /** 버스·기차 승차권: 출발·도착 정류장, 회사, 좌석 */
+  ride?: RideInfo
 }
 
 export interface TourInfo {
@@ -296,7 +298,7 @@ export function findDateRange(text: string, year: number): [string, string] | un
 
 /** 여행 기간 안의 날짜가 있으면 그것을, 없으면 처음 찾은 날짜를 돌려준다 */
 const DATE_LABEL = /체크\s*인|check[\s-]*in|이용\s*일|방문\s*일|관람\s*일|visit(?:ing)?\s*date|travel\s*date|date\s*of\s*visit|출발|departure|탑승일|日付|ご利用日|วันที่/i
-const NOT_DATE_LABEL = /환불|취소|cancel|refund|까지|체크\s*아웃|check[\s-]*out|예약\s*일|결제\s*일|booked\s*on|booking\s*date|발행|issued|만료|expir/i
+const NOT_DATE_LABEL = /기한|환불|취소|cancel|refund|까지|체크\s*아웃|check[\s-]*out|예약\s*일|결제\s*일|booked\s*on|booking\s*date|발행|issued|만료|expir/i
 
 export function pickTripDate(text: string, days: string[]): string | undefined {
   setDateRef(days)
@@ -611,6 +613,37 @@ const fixAddress = (a: string) => a.replace(/\bZ\W?a?aland\b|Z\S{0,2}aland\b/i, 
  *   GYG32LV5GNAQ / 카이코우라: 물개 관람 페달 카약 투어 / Kaikoura: Seal-Watching Pedal Kayak Tour / 옵션 (Seal Kayak tour)
  *   2026년 12월 9일 수 오후 1:30 / 미팅 포인트 18 Beach Road, Kaikōura 7300, New Zealand / 블랙 래빗 피자 건너편에서 만나요 …
  */
+/* ── 버스·기차 승차권 ── */
+export interface RideInfo { kind: 'bus' | 'train'; from: string; to: string; company?: string; grade?: string; seat?: string; date?: string; time?: string }
+const RIDE = /승차권|고속\s*버스|시외\s*버스|버스|터미널|KTX|SRT|ITX|무궁화|새마을|열차|기차|코레일|korail|\bbus\b|\btrain\b|coach/i
+const TRAIN = /KTX|SRT|ITX|무궁화|새마을|열차|기차|코레일|korail|\btrain\b|호차/i
+/** '출발 청주시외', 'ㅇ 출발 인천공항71' → 정류장 이름. OCR 찌꺼기(ㅇ, o, ©)와 붙어 읽힌 T1→71을 고친다 */
+const stop = (s: string) => s.replace(/^[^\p{L}\d]*(?:[ㅇoO0©@]\s+)?/u, '').replace(/(공항|터미널)\s*[7T1Il|]([12])$/u, '$1T$2').replace(/\s{2,}.*$/, '').trim()
+export function readRide(lines: string[], days: string[]): RideInfo | undefined {
+  const year = Number((days[0] ?? '').slice(0, 4)) || new Date().getFullYear()
+  setDateRef(days)
+  let from: string | undefined, to: string | undefined, seat: string | undefined
+  for (const l of lines) {
+    const f = l.match(/(?:^|\s)(?:출발(?!\s*(?:일|시각|시간|일시))|from)\s*[:：]?\s*(\S.{0,30})$/i)
+    if (f && !from) from = stop(f[1])
+    const t = l.match(/(?:^|\s)(?:도착(?!\s*(?:일|시각|시간|일시))|to)\s*[:：]?\s*(\S.{0,30})$/i)
+    if (t && !to) to = stop(t[1])
+    const s = l.match(/좌석\s*(?:번호)?\s*[:：]?\s*(\d{1,3}[A-Z]?(?:\s*[,번]\s*\d{1,3}[A-Z]?)*)\s*번?\s*$/) ?? l.match(/(\d{1,2})\s*호차\s*(\d{1,3}[A-Z]?)/)
+    if (s && !seat) seat = s[2] ? `${s[1]}호차 ${s[2]}` : s[1]
+  }
+  if (!from || !to || from.length < 2 || to.length < 2) return undefined
+  const text = lines.join('\n')
+  // 타는 날짜·시각: 결제기한·취소 안내가 아닌 줄에서 날짜와 시각이 함께 있는 줄
+  const when = lines.find((l) => findDates(l, year).length && /\d{1,2}\s*:\s*\d{2}/.test(l) && !/기한|까지|취소|환불|결제|발권|예매일|deadline|cancel/i.test(l))
+  const company = text.match(/([가-힣]{2,6}고속|[가-힣]{2,6}여객|[가-힣]{2,6}교통|[가-힣]{2,6}운수|코레일|KTX(?:-산천|-이음)?|SRT|ITX-?[가-힣A-Za-z]*|무궁화호?|새마을호?)/)?.[1]
+  const grade = text.match(/(심야\s*우등|프리미엄|우등|일반실|특실|일반)(?=\s|$)/)?.[1]?.replace(/\s/g, '')
+  return {
+    kind: TRAIN.test(text) ? 'train' : 'bus', from, to, company, grade, seat,
+    date: when ? findDates(when, year)[0] : undefined,
+    time: when?.match(/(\d{1,2})\s*:\s*(\d{2})(?!.*\d{1,2}\s*:\s*\d{2})/)?.slice(1).map((x, i) => (i ? x : x.padStart(2, '0'))).join(':'),
+  }
+}
+
 export function readTour(lines: string[]): { name?: string; code?: string; info: TourInfo } {
   // 오른쪽 칸(지도 글씨, QR 옆 글씨)은 두 칸 넘게 띄어져 읽히므로 왼쪽 칸만 쓴다
   // (맨 앞이 '-' 같은 기호만인 칸이면 글자가 있는 첫 칸)
@@ -688,8 +721,11 @@ export function readText(all: OcrLine[], days: string[], tripCurrency: string): 
   if (!flights.length && !hotelPage) { const t = flightFromTable(lines.filter((l) => !CHROME.test(l.text)).map((l) => l.text).join('\n'), days); if (t) flights = [t] }
   flights = flights.map((f, i) => ({ ...f, id: `ocr${Date.now()}${i}` }))
   // 투어·액티비티 바우처: 숙소(체크아웃 있는) 화면이 아니면, 피자집 안내 같은 낱말보다 먼저 본다
-  const tourPage = !flights.length && !hotelPage && TOUR.test(text)
+  // 버스·기차 승차권: 출발·도착 정류장이 있는 화면
+  const ride = !flights.length && !hotelPage && RIDE.test(text) ? readRide(lines.filter((l) => !CHROME.test(l.text)).map((l) => l.text), days) : undefined
+  const tourPage = !flights.length && !hotelPage && !ride && TOUR.test(text)
   const kind = flights.length ? { cat: 'sight' as Category, exp: 'move' as ExpenseCategory, costOnly: true }
+    : ride ? { cat: 'move' as Category, exp: 'move' as ExpenseCategory, costOnly: false }
     : tourPage ? { cat: (OUTDOOR.test(text) ? 'nature' : 'sight') as Category, exp: 'play' as ExpenseCategory, costOnly: false }
     : KINDS.find((k) => k.re.test(text))
   // 휴대폰 상태 표시줄(시계·배터리)과 브라우저 주소창·메뉴 줄은 내용이 아니다.
@@ -725,10 +761,10 @@ export function readText(all: OcrLine[], days: string[], tripCurrency: string): 
   const stay = kind?.cat === 'stay' ? stayOf(body.map((l) => l.text), days) : undefined
   const tour = tourPage ? readTour(body.map((l) => l.text)) : undefined
   return {
-    name: stayName ?? tour?.name ?? (name && fixBrand(name)),
+    name: ride ? `${ride.from} → ${ride.to}` : stayName ?? tour?.name ?? (name && fixBrand(name)),
     code: findCode(text) ?? tour?.code,
-    date: pickTripDate(text, days),
-    time: findTime(lines.filter((l) => /시간|시각|time|체크\s*인|check[\s-]*in|입장|時/i.test(l.text)).map((l) => l.text).join('\n')) ?? findTime(body.map((l) => l.text).join('\n')),
+    date: ride?.date ?? pickTripDate(text, days),
+    time: ride?.time ?? findTime(lines.filter((l) => /시간|시각|time|체크\s*인|check[\s-]*in|입장|時/i.test(l.text)).map((l) => l.text).join('\n')) ?? findTime(body.map((l) => l.text).join('\n')),
     amount,
     currency: amount ? findCurrency(text, guessCur) : undefined,
     category: (tour?.name && categoryByName(tour.name)) || (kind?.cat ?? 'sight'),
@@ -738,5 +774,6 @@ export function readText(all: OcrLine[], days: string[], tripCurrency: string): 
     flightChoices: listed.length && flightChoices.some(Boolean) ? flightChoices : undefined,
     stay: stay || info.city ? { ...stay, city: stay?.city ?? info.city, room: info.room } : undefined,
     tour: tour?.info,
+    ride,
   }
 }
