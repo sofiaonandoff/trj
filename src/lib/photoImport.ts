@@ -5,9 +5,9 @@ import type { Expense, Flight, Place, Stay, Trip } from '../types'
 import { airlineOf, loadWorldAirports } from '../data/airports'
 import { reverseGeocode, searchPlaces } from './geocode'
 import { legOf } from './legs'
-import { ocrPasses, recognize, recognizeBand, signWords } from './ocr'
+import { ocrPasses, recognize, recognizeBand, recognizeSparse, signWords } from './ocr'
 import { readExif } from './photos'
-import { readText, stayLabelLine, stayOf } from './receipt'
+import { hasFlightNo, readText, stayLabelLine, stayOf } from './receipt'
 import { payerFor, putStay, splitFor, removeStay } from '../store'
 import { addDays, fromMin, km, toMin, uid } from './util'
 import { hopMin } from './route'
@@ -80,6 +80,15 @@ export async function readTripPhoto(file: File, trip: Trip, current: string, onS
   for (const alt of ('others' in ocr ? ocr.others : undefined) ?? []) {
     const r2 = readText(alt, days, trip.currency)
     if (r2.flights.length > r.flights.length) { r = r2; lines = alt }
+  }
+
+  // 편명은 보이는데 항공편을 못 만들었으면 (출발 도시 '방콕'처럼 홀로 떨어진 짧은 글자를 놓친 경우)
+  // 흩어진 글자 방식으로 한 번 더 읽는다
+  if (!pdf && !r.flights.length && hasFlightNo(lines.map((l) => l.text).join('\n'))) {
+    onStage?.(tr('항공편을 다시 읽는 중'))
+    const sparse = await recognizeSparse(file, ocr.langs.length ? ocr.langs : ['kor', 'eng']).catch(() => [])
+    const r2 = sparse.length ? readText(sparse, days, trip.currency) : undefined
+    if (r2?.flights.length) { r = { ...r2, amount: r2.amount ?? r.amount, currency: r2.currency ?? r.currency, code: r2.code ?? r.code }; lines = sparse }
   }
 
   // 숙소 화면인데 체크인·체크아웃이 제대로 안 읽혔으면 그 칸만 크게 키워 다시 읽는다

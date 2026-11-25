@@ -1,5 +1,5 @@
 import { despaceCJK } from '../src/lib/ocr'
-import { findCode, findStayDates, findStayInfo, stayTime, findDates, findName, findTime, findTotal, fixBrand, parseAmount, pickTripDate, readText, fixFlightNos, stripJamo, tidyItemName, withCount } from '../src/lib/receipt'
+import { findCode, findStayDates, findStayInfo, stayTime, findDates, findName, findTime, findTotal, fixBrand, parseAmount, pickTripDate, readText, fixFlightNos, stripJamo, tidyItemName, withCount, hasFlightNo } from '../src/lib/receipt'
 
 import { loadWorldAirports } from '../src/data/airports'
 await loadWorldAirports()
@@ -144,5 +144,10 @@ check('주문 내역 이름: 옵션 줄이 아니라 상품 줄 (외 1건)', /^�
 // 트립닷컴 숙소 예약 상세 (ROYS Hotel): 버튼 줄이 아니라 호텔 이름, 아래 줄의 Check-out 시각, Location 아래 두 줄 주소
 const roys = readText(["5:37 ม                        all T &", "Booking No. 1688903134526334", "7 We price match Hotel stay guarantee", "Paid KRW 59,196", "Price details", "It's free to cancel now", "You can cancel for free before 23:59, Feb 6, 2027", "(property's local time). After that, the booking is ทอท-", "refundable.", "Cancellation policy", "ROYS Hotel Bangkok - Rama 9       —", "โรงแรมรอยส์ กรุงเทพฯ - พระราม 9                   PIR", "Property details", "Message Property         Call/email property", "Tue, Feb 9 - Wed, Feb 10, 2027 1 night", "Check-in: After 14:00", "Check-out: Before 12:00", "Modify dates", "© Location", "135/6 Soi Soonvijai 14, Bangkapi Khet, Huai", "Khwang, Bangkok, 10310, Thailand 10", "Local-language address View map", "Cancel Booking             Manage booking"].map((text, i) => ({ text, top: i * 40, height: 30 })), ['2027-02-09', '2027-02-10'], 'THB')
 check('트립닷컴 숙소: ROYS Hotel Bangkok - Rama 9, 2.9 14:00 → 2.10 12:00, 주소, KRW 59,196, 예약번호', roys.name === 'ROYS Hotel Bangkok - Rama 9' && roys.stay?.checkIn === '2027-02-09' && roys.stay?.checkOut === '2027-02-10' && roys.stay?.inTime === '14:00' && roys.stay?.outTime === '12:00' && roys.stay?.address === '135/6 Soi Soonvijai 14, Bangkapi Khet, Huai Khwang, Bangkok, 10310, Thailand' && roys.amount === 59196 && roys.currency === 'KRW' && roys.code === '1688903134526334', [roys.name, roys.stay, roys.amount, roys.code])
+// 대한항공 예약 화면: 도시 이름만 따로 선 줄 ('방콕' / '서울 / 인천 / SEL'), 시각 두 줄, 편명 항목
+const ke662 = readText(['여정 01', '2027.02.14(일)', '방콕', '서울 / 인천 / SEL', '12:25', '19:50', '직항', '편명', 'KE662 A330 @ 대한항공 운항', '클래스', '이코노미(%)'].map((text, i) => ({ text, top: i * 40, height: 30 })), ['2027-02-09', '2027-02-14'], 'THB')
+const kf662 = ke662.flights[0]
+check('대한항공: KE662 BKK→ICN 2027-02-14 12:25→19:50', kf662?.flightNo === 'KE662' && kf662.from === 'BKK' && kf662.to === 'ICN' && kf662.depDate === '2027-02-14' && kf662.depTime === '12:25' && kf662.arrTime === '19:50', ke662.flights)
+check('편명이 보이는지: 기종(A330)은 편명이 아니다', hasFlightNo('편명 KE662 A330') && !hasFlightNo('A330 B787 객실'))
 console.log(fail ? `${fail}개 실패` : '모두 통과')
 process.exit(fail ? 1 : 0)

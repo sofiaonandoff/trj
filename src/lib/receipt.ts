@@ -545,6 +545,22 @@ export function flightFromTable(text: string, days: string[]): Flight | null {
     }
     if (found.length >= 2) [from, to] = found
   }
+  // 도시 이름만 따로 선 줄 (대한항공 예약 화면): '방콕' / '서울 / 인천 / SEL' / 12:25 / 19:50.
+  // 짧은 줄을 '/'로 나눠 도시를 찾고, 한 줄에서는 첫 공항만 (서울·인천은 같은 ICN). 한글 도시는 두 글자도 받는다
+  if (!from) {
+    const found: string[] = []
+    for (const l of lines) {
+      if (l.trim().split(/\s+/).length > 6 || /\d{3,}/.test(l) || l.replace(/\s/g, '').toUpperCase().includes(flightNo)) continue
+      for (const part of l.split(/\s*\/\s*|\s{2,}/)) {
+        const w = part.replace(/[^\p{L} .'-]/gu, '').trim()
+        if (!w || NOT_CITY.has(w.toLowerCase()) || (w.length < 3 && !/^[가-힣]{2}$/.test(w))) continue
+        const c = isAirport(w) ? w : airportByCity(w)
+        if (c) { if (!found.includes(c)) found.push(c); break }
+      }
+      if (found.length >= 2) break
+    }
+    if (found.length >= 2) [from, to] = found
+  }
   if (!from && allCodes.length >= 2) [from, to] = allCodes
   if (!from || !to) return null
 
@@ -624,6 +640,10 @@ export function fixFlightNos(line: string): string {
   })
 }
 const FLIGHT_NO = /(?<![A-Za-z0-9-])([A-Z]{2}|[A-Z]\d|\d[A-Z])\s?(\d{2,4})(?![\d:-])/g
+/** 화면에 아는 항공사의 편명이 보이는지 (항공편을 못 만들었을 때 다시 읽어 볼지 정한다) */
+export function hasFlightNo(text: string): boolean {
+  return [...fixFlightNos(text).matchAll(FLIGHT_NO)].some((m) => AIRLINES[m[1]] && !/^[AB]\d{3}/.test(m[0]))
+}
 export function connectingFlights(text: string, days: string[]): Flight[] {
   setDateRef(days)
   const year = Number((days[0] ?? '').slice(0, 4)) || new Date().getFullYear()
