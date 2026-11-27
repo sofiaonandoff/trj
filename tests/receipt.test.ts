@@ -149,5 +149,8 @@ const ke662 = readText(['여정 01', '2027.02.14(일)', '방콕', '서울 / 인�
 const kf662 = ke662.flights[0]
 check('대한항공: KE662 BKK→ICN 2027-02-14 12:25→19:50', kf662?.flightNo === 'KE662' && kf662.from === 'BKK' && kf662.to === 'ICN' && kf662.depDate === '2027-02-14' && kf662.depTime === '12:25' && kf662.arrTime === '19:50', ke662.flights)
 check('편명이 보이는지: 기종(A330)은 편명이 아니다', hasFlightNo('편명 KE662 A330') && !hasFlightNo('A330 B787 객실'))
+// 공항버스 결제완료 화면: '출발지 / 도착지 / 출발일시' 항목 (버스라는 낱말 없음)
+const b3 = readText(["X                  결제완료", ") SAE", "결제가 완료되었습니다.", "여정 1", "출발지                                미금역", "도착지                            인천공항12", "출발일시                         2026.12.02 (수) 11:40", "일반 1                              12,600원", "금액                             12,600원", "결제상세", "이용금액                           12,600원", "총 결제금액                               12,600원"].map((text, i) => ({ text, top: i * 40, height: 30 })), ['2026-12-01', '2026-12-02'], 'THB')
+check('공항버스 결제완료: 미금역 → 인천공항T2, 12.2 11:40, 12,600원 교통', b3.name === '미금역 → 인천공항T2' && b3.date === '2026-12-02' && b3.time === '11:40' && b3.amount === 12600 && b3.category === 'move' && b3.expenseCategory === 'move', [b3.name, b3.date, b3.time, b3.amount, b3.category])
 console.log(fail ? `${fail}개 실패` : '모두 통과')
 process.exit(fail ? 1 : 0)

@@ -705,9 +705,9 @@ export function readRide(lines: string[], days: string[]): RideInfo | undefined 
   setDateRef(days)
   let from: string | undefined, to: string | undefined, seat: string | undefined
   for (const l of lines) {
-    const f = l.match(/(?:^|\s)(?:출발(?!\s*(?:일|시각|시간|일시))|from)\s*[:：]?\s*(\S.{0,30})$/i)
+    const f = l.match(/(?:^|\s)(?:출발(?:지|역|터미널|정류장)?(?!\s*(?:일|시각|시간|일시))|from)\s*[:：]?\s*(\S.{0,30})$/i)
     if (f && !from) from = stop(f[1])
-    const t = l.match(/(?:^|\s)(?:도착(?!\s*(?:일|시각|시간|일시))|to)\s*[:：]?\s*(\S.{0,30})$/i)
+    const t = l.match(/(?:^|\s)(?:도착(?:지|역|터미널|정류장)?(?!\s*(?:일|시각|시간|일시))|to)\s*[:：]?\s*(\S.{0,30})$/i)
     if (t && !to) to = stop(t[1])
     const s = l.match(/좌석\s*(?:번호)?\s*[:：]?\s*(\d{1,3}[A-Z]?(?:\s*[,번]\s*\d{1,3}[A-Z]?)*)\s*번?\s*$/) ?? l.match(/(\d{1,2})\s*호차\s*(\d{1,3}[A-Z]?)/)
     if (s && !seat) seat = s[2] ? `${s[1]}호차 ${s[2]}` : s[1]
@@ -803,7 +803,7 @@ export function readText(all: OcrLine[], days: string[], tripCurrency: string): 
   flights = flights.map((f, i) => ({ ...f, id: `ocr${Date.now()}${i}` }))
   // 투어·액티비티 바우처: 숙소(체크아웃 있는) 화면이 아니면, 피자집 안내 같은 낱말보다 먼저 본다
   // 버스·기차 승차권: 출발·도착 정류장이 있는 화면
-  const ride = !flights.length && !hotelPage && RIDE.test(text) ? readRide(lines.filter((l) => !CHROME.test(l.text)).map((l) => l.text), days) : undefined
+  const ride = !flights.length && !hotelPage && (RIDE.test(text) || (/^\W*출발\s*지/m.test(text) && /^\W*도착\s*지/m.test(text))) ? readRide(lines.filter((l) => !CHROME.test(l.text)).map((l) => l.text), days) : undefined
   const tourPage = !flights.length && !hotelPage && !ride && TOUR.test(text)
   const kind = flights.length ? { cat: 'sight' as Category, exp: 'move' as ExpenseCategory, costOnly: true }
     : ride ? { cat: 'move' as Category, exp: 'move' as ExpenseCategory, costOnly: false }
