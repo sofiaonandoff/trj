@@ -10,7 +10,7 @@ import { readExif } from './photos'
 import { hasFlightNo, readText, stayLabelLine, stayOf } from './receipt'
 import { payerFor, putStay, splitFor, removeStay } from '../store'
 import { addDays, fromMin, km, toMin, uid } from './util'
-import { hopMin } from './route'
+import { hopMin, roadLeg } from './route'
 
 /**
  * "사진으로 추가": 영수증·예약 화면·탑승권·장소 사진을 기기 안에서 읽어 일정과 예산에 넣는다 (AI를 쓰지 않는다).
@@ -240,8 +240,13 @@ export async function readTripPhoto(file: File, trip: Trip, current: string, onS
     const [a, b] = await Promise.all([find(ride.from), find(ride.to)])
     const label = ride.kind === 'bus' ? tr('버스') : tr('기차')
     const rideName = `${ride.from} → ${ride.to} ${label}`
-    // 걸리는 시간: 직선거리로 어림 (버스 시속 70km, 기차 110km, 길이 굽은 만큼 1.3배)
-    const duration = a && b ? Math.max(30, Math.round((km(a, b) * 1.3) / (ride.kind === 'bus' ? 70 : 110) * 6) * 10) : 120
+    // 걸리는 시간:
+    // - 버스: 도로 길찾기의 차 시간 × 1.25 (정류장에 서고 타고 내리는 시간), 10분 단위
+    // - 길찾기를 못 받았거나 기차면 직선거리로 어림 (버스 시속 70km, 기차 110km, 길이 굽은 만큼 1.3배)
+    // - 출발지·도착지를 지도에서 못 찾으면 2시간
+    const road = a && b && ride.kind === 'bus' ? await roadLeg(a, b) : undefined
+    const duration = road ? Math.max(20, Math.round((road.min * 1.25) / 10) * 10)
+      : a && b ? Math.max(30, Math.round((km(a, b) * 1.3) / (ride.kind === 'bus' ? 70 : 110) * 6) * 10) : 120
     const note = [ride.company, ride.grade, ride.seat && tr('좌석 {0}', ride.seat), tr('도착 {0}', ride.to), r.code && tr('예약번호 {0}', r.code)].filter(Boolean).join(' · ')
     const loc = a ?? where ?? near
     out.push({

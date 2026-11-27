@@ -94,5 +94,22 @@ export function ensureRoute(points: LL[]) {
 /** routeSegments([lng, lat][][]) 그대로 받기 */
 export const ensureSegments = (segs: [number, number][][]) => segs.forEach((s) => ensureRoute(s.map(([lng, lat]) => ({ lat, lng }))))
 
+/**
+ * 두 곳 사이 차로 가는 길을 지금 바로 받는다 (사진으로 넣은 버스 일정의 걸리는 시간 등).
+ * 받아 둔 구간이 있으면 그것, 없으면 /api/route에 묻고 받아 둔다. 오프라인·실패면 undefined
+ */
+export async function roadLeg(a: LL, b: LL): Promise<{ km: number; min: number } | undefined> {
+  const k = legKey(a, b)
+  if (!cache[k] && typeof fetch !== 'undefined' && !(typeof navigator !== 'undefined' && navigator.onLine === false)) {
+    try {
+      const res = await fetch('/api/route', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pts: [[a.lng, a.lat], [b.lng, b.lat]] }) })
+      const l = ((await res.json().catch(() => ({}))) as { legs?: (LegPair | null)[] }).legs?.[0]
+      if (l && Array.isArray(l.c)) { cache[k] = l; save(); useRouteTick.getState().bump() }
+    } catch { /* 어림값을 쓴다 */ }
+  }
+  const leg = cache[k]
+  return leg ? { km: leg.c[0] / 1000, min: leg.c[1] / 60 } : undefined
+}
+
 /** 테스트용: 구간을 직접 넣는다 */
 export const _putLeg = (a: LL, b: LL, l: LegPair) => { cache[legKey(a, b)] = l }

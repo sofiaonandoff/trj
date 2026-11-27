@@ -1,7 +1,7 @@
 // 도로 길찾기: 서버(OSRM 응답 해석, KV 캐시)와 화면의 도보/택시 판단
 import { handleRoute } from '../server/route'
 import { memoryStore } from '../server/view'
-import { _putLeg, hop } from '../src/lib/route'
+import { _putLeg, hop, roadLeg } from '../src/lib/route'
 
 let fail = 0
 const check = (label: string, ok: boolean, got?: unknown) => { if (!ok) fail++; console.log(ok ? 'PASS' : 'FAIL', label, ok ? '' : JSON.stringify(got)) }
@@ -33,4 +33,10 @@ check('걸어서 15분 넘으면 택시: 차 5분 × 1.3 + 5분 ≈ 12분, 도�
 _putLeg(C, D, { w: [450, 340], c: [900, 120] })
 const w = hop(C, D)
 check('15분 이내는 도보: 6분, 도보 거리 450m', w.mode === 'walk' && w.min === 6 && w.km === 0.45, w)
+// 사진으로 넣은 버스 일정: 도로 길찾기의 차 시간 (미금역 → 인천공항 T2, 78.6km 70분)
+globalThis.fetch = (async () => new Response(JSON.stringify({ legs: [{ w: [70000, 60000], c: [78641, 4218] }] }))) as typeof fetch
+const MG = { lat: 37.34986, lng: 127.11057 }, T2 = { lat: 37.46847, lng: 126.43474 }
+const road = await roadLeg(MG, T2)
+check('roadLeg: 도로 거리·차 시간', road !== undefined && Math.round(road.km * 10) === 786 && Math.round(road.min) === 70, road)
+check('버스 걸리는 시간 = 차 시간 × 1.25, 10분 단위 → 90분', Math.max(20, Math.round((road!.min * 1.25) / 10) * 10) === 90)
 process.exit(fail ? 1 : 0)
