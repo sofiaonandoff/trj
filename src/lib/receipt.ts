@@ -333,6 +333,9 @@ export function pickTripDate(text: string, days: string[]): string | undefined {
 export function findTime(text: string): string | undefined {
   // 오전/오후·AM/PM이 붙은 시각을 먼저 믿는다 (오후가 '2%'처럼 깨져 읽힌 '1:30' 대신 'at 1:30 PM')
   const all = [...text.matchAll(/(오전|오후|午前|午後)?\s*(?<!\d)([01]?\d|2[0-3])\s*:\s*([0-5]\d)(?:\s*:\s*[0-5]\d)?\s*(AM|PM|am|pm|A\.M\.|P\.M\.)?/g)]
+  // '1.20pm'처럼 점으로 적은 시각 (오전·오후 표시가 있을 때만: 금액 1.20과 헷갈리지 않게)
+  for (const d of text.matchAll(/(?<![\d.])([01]?\d)\.([0-5]\d)\s*(am|pm|a\.m\.|p\.m\.)(?![a-z])/gi)) all.push(Object.assign([d[0], undefined, d[1], d[2], d[3]], { index: d.index }) as unknown as RegExpExecArray)
+  all.sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
   const m = all.find((x) => x[1] || x[4]) ?? all[0]
   if (!m) return undefined
   let h = Number(m[2])
@@ -344,9 +347,15 @@ export function findTime(text: string): string | undefined {
 
 /** 예약번호·확인번호·주문번호 (JOMO parse.ts에서 가져와 넓힘) */
 export function findCode(text: string): string | undefined {
-  const re = /(예약\s*번호|확인\s*번호|예약\s*코드|승인\s*번호|주문\s*번호|예매\s*번호|booking\s*(?:reference|ref\.?|number|no\.?|id|code)|confirmation\s*(?:number|no\.?|code|#)|reservation\s*(?:number|no\.?|code|id)|record\s*locator|PNR|order\s*(?:number|no\.?|id|#)|(?<![A-Za-z])ID(?=\s*[:：#]\s*\d{6})|itinerary\s*(?:number|no\.?)|予約番号|受付番号)\s*[:：#.]?\s*([A-Z0-9][A-Z0-9-]{3,24})/i
-  const m = re.exec(text)
-  return m ? m[2].toUpperCase() : undefined
+  const label = /(?<![A-Za-z])reference(?=\s*[:：])|예약\s*번호|확인\s*번호|예약\s*코드|승인\s*번호|주문\s*번호|예매\s*번호|booking\s*(?:reference|ref\.?|number|no\.?|id|code)|confirmation\s*(?:number|no\.?|code|#)|reservation\s*(?:number|no\.?|code|id)|record\s*locator|PNR|order\s*(?:number|no\.?|id|#)|(?<![A-Za-z])ID(?=\s*[:：#]\s*\d{6})|itinerary\s*(?:number|no\.?)|予約番号|受付番号/
+  const re = new RegExp(`(${label.source})(\\s*[:：#.]?\\s*)([A-Z0-9][A-Z0-9-]{3,24})`, 'gi')
+  for (const m of text.matchAll(re)) {
+    const [, name, sep, v] = m
+    // 값이 다음 줄에 있거나 'Reference'만 적힌 항목이면 숫자가 든 것만 ('Booking Ref:' 다음 줄의 'forward to …'는 번호가 아니다)
+    if ((/\n/.test(sep) || /^reference$/i.test(name)) && !/\d/.test(v)) continue
+    return v.toUpperCase()
+  }
+  return undefined
 }
 
 const CURRENCY: [RegExp, string][] = [
@@ -817,7 +826,10 @@ export function readText(all: OcrLine[], days: string[], tripCurrency: string): 
   // 숙소·항공권 화면에는 이름·예약번호·비행시간 같은 숫자가 많아, 합계·결제·운임 항목이 붙은 금액만 믿는다
   const labelledOnly = kind?.cat === 'stay' || flights.length > 0
   const amount = findTotal(body.map((l) => l.text).filter((t) => !labelledOnly || ((TOTAL.test(t) || (flights.length > 0 && /운임|요금|항공료|fare|price/i.test(t))) && !NOT_TOTAL.test(t))))
-  const name = findName(body)
+  // '<이름> Booking Confirmation' 머리글 (호비튼 예약 확인서 등): 앞부분이 장소 이름
+  const headline = body.map((l) => l.text.match(/^\W*(.{3,50}?)\s*(?:booking|reservation|order)\s+confirmation\b|^\W*(.{3,50}?)\s*(?:e-?ticket|voucher|예약\s*확인서?)\s*[/|]?\s*$/i)).find(Boolean)
+  const headName = headline ? (headline[1] ?? headline[2]).replace(/[™®©]|\bTM\b/g, '').replace(/\s{2,}/g, ' ').trim() : undefined
+  const name = headName && /\p{L}{3,}/u.test(headName) ? headName : findName(body)
   // 통화 기호를 못 읽었을 때: 한글 위주면 원화, 가나가 있으면 엔화로 본다
   const hangul = (text.match(/\p{Script=Hangul}/gu) ?? []).length
   const kana = /[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(text)
